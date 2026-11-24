@@ -11257,7 +11257,8 @@ function lineupForm(box, f, c, withT, app) {
   const presets = Array.isArray(c.tacticPresets) ? c.tacticPresets : [];
   const order = { ВР: 0, ЛЗ: 1, ЦЗ: 2, ПЗ: 3, ЛП: 4, ОП: 5, ЦП: 6, АП: 7, ПП: 8, ЛВ: 9, ЦФ: 10, ПВ: 11 };
   const sq = [...c.squad].sort((a, b) => (order[a.pos] ?? 6) - (order[b.pos] ?? 6));
-  const isRpl = c.team.comp === 'rpl' || f.comp === 'rpl';
+  const isFriendlyComp = f.comp === 'friendly' || f.comp === 'friendly_match' || f.isIntraSquad;
+  const isRpl = !isFriendlyComp && (f.comp === 'rpl' || f.comp === 'cup' || f.comp === 'supercup' || (c.team.comp === 'rpl' && f.comp !== 'fnl'));
   const limit = c.legionLimit || { inSquad: 12, onPitch: 7, label: '12+7' };
   const fFatMap = isAdmin ? (f.fatigueByPid || {}) : {};
   const fAvailMap = f.availByPid || {};
@@ -11546,24 +11547,107 @@ function lineupForm(box, f, c, withT, app) {
     });
   };
 
+  const getNormalizedPlannedSubs = (sPids, bPids) => {
+    if (sPids.length < 11 || !bPids.length) return [];
+    const sSet = new Set(sPids);
+    const bSet = new Set(bPids);
+    const validSubs = [];
+    const usedIn = new Set();
+    const usedOut = new Set();
+    const onPitch = new Set(sSet);
+    const sorted = currentPlannedSubs
+      .map((item, origIdx) => ({ ...item, origIdx }))
+      .sort((a, b) => a.minute - b.minute || a.origIdx - b.origIdx);
+    for (const ps of sorted) {
+      if (validSubs.length >= 5) break;
+      if (!ps.outPid || !ps.inPid || ps.outPid === ps.inPid) continue;
+      if (!bSet.has(ps.inPid) || usedIn.has(ps.inPid)) continue;
+      if (!onPitch.has(ps.outPid) || usedOut.has(ps.outPid)) continue;
+      usedIn.add(ps.inPid);
+      usedOut.add(ps.outPid);
+      onPitch.delete(ps.outPid);
+      onPitch.add(ps.inPid);
+      validSubs.push({ minute: ps.minute, outPid: ps.outPid, inPid: ps.inPid, condition: ps.condition || 'always' });
+    }
+    return validSubs;
+  };
+
+  const simulateSubsLegionClient = (subs, sPids) => {
+    const isLeg = pid => !!poolById[pid]?.isLegionnaire;
+    const starterLeg = sPids.filter(isLeg).length;
+    if (!isRpl) {
+      return { ok: true, starterLeg, maxLeg: starterLeg, badIndices: new Set(), issues: [], rowStates: subs.map(() => ({ projected: 0, isOver: false, delta: 0 })) };
+    }
+    let curAlwaysLeg = starterLeg;
+    let extraCondLeg = 0;
+    let maxLeg = starterLeg;
+    const badIndices = new Set();
+    const issues = [];
+    const rowStates = new Array(subs.length);
+    let i = 0;
+    while (i < subs.length) {
+      const minVal = subs[i].minute;
+      const condVal = subs[i].condition || 'always';
+      let j = i;
+      while (j < subs.length && subs[j].minute === minVal && (subs[j].condition || 'always') === condVal) j++;
+      const batch = subs.slice(i, j);
+      const batchDelta = batch.reduce((acc, ps) => acc + ((isLeg(ps.inPid) ? 1 : 0) - (isLeg(ps.outPid) ? 1 : 0)), 0);
+      const projected = curAlwaysLeg + extraCondLeg + batchDelta;
+      if (projected > maxLeg) maxLeg = projected;
+      const isOver = projected > limit.onPitch;
+      for (let k = i; k < j; k++) {
+        const ps = subs[k];
+        const d = (isLeg(ps.inPid) ? 1 : 0) - (isLeg(ps.outPid) ? 1 : 0);
+        if (isOver && (d > 0 || batchDelta > 0)) badIndices.add(k);
+        rowStates[k] = { projected, isOver, delta: d, cond: condVal };
+      }
+      if (isOver) {
+        const culprit = batch.find(ps => isLeg(ps.inPid) && !isLeg(ps.outPid)) || batch[0];
+        const inNm = poolById[culprit.inPid]?.name || culprit.inPid;
+        const outNm = poolById[culprit.outPid]?.name || culprit.outPid;
+        const condNote = (condVal === 'always' && extraCondLeg > 0)
+          ? ' (с учётом более ранних условных замен)'
+          : (condVal !== 'always' ? ' (при срабатывании условия)' : '');
+        issues.push(`${minVal}' (${inNm} вместо ${outNm}): станет ${projected}/${limit.onPitch}${condNote}`);
+      }
+      if (condVal === 'always') curAlwaysLeg += batchDelta;
+      else if (batchDelta > 0) extraCondLeg += batchDelta;
+      i = j;
+    }
+    return {
+      ok: issues.length === 0 && starterLeg <= limit.onPitch,
+      starterLeg,
+      maxLeg,
+      badIndices,
+      issues,
+      rowStates
+    };
+  };
+
   const cnt = () => {
     const { sPids, bPids } = getSelected();
     const a = sPids.length;
     const b = bPids.length;
-    const legOnPitch = sPids.filter(id => {
-      const p = c.squad.find(x => x.id === id) || loanPool.find(x => x.id === id);
-      return p?.isLegionnaire;
-    }).length;
+    const legOnPitch = sPids.filter(id => !!poolById[id]?.isLegionnaire).length;
+    const validSubs = getNormalizedPlannedSubs(sPids, bPids);
+    const subSim = simulateSubsLegionClient(validSubs, sPids);
 
     let legionInfo = '';
     if (isRpl) {
-      const isOver = legOnPitch > limit.onPitch;
-      legionInfo = ` · <span style="font-weight:700;color:${isOver ? '#dc2626' : '#15803d'}">⚡ Легионеров на поле: ${legOnPitch}/${limit.onPitch} (лимит ${limit.label})${isOver ? ' — ПРЕВЫШЕН ЛИМИТ!' : ''}</span>`;
+      const startOver = legOnPitch > limit.onPitch;
+      const subsOver = !startOver && !subSim.ok;
+      const isOver = startOver || subsOver;
+      const subSuffix = subsOver
+        ? ` · после замен до ${subSim.maxLeg}/${limit.onPitch} — ПРЕВЫШЕН ЛИМИТ!`
+        : (validSubs.length && subSim.maxLeg !== legOnPitch ? ` (с заменами до ${subSim.maxLeg}/${limit.onPitch})` : '');
+      legionInfo = ` · <span style="font-weight:700;color:${isOver ? '#dc2626' : '#15803d'}">⚡ Легионеров на поле: ${legOnPitch}/${limit.onPitch} (лимит ${limit.label})${startOver ? ' — ПРЕВЫШЕН ЛИМИТ!' : subSuffix}</span>`;
       const saveBtn = box.querySelector('.save');
       if (saveBtn) {
         if (isOver) {
           saveBtn.disabled = true;
-          saveBtn.title = `Превышен лимит легионеров на поле (${legOnPitch} из ${limit.onPitch})`;
+          saveBtn.title = startOver
+            ? `Превышен лимит легионеров в старте (${legOnPitch} из ${limit.onPitch})`
+            : `Превышен лимит легионеров при заменах (${subSim.issues[0] || `до ${subSim.maxLeg} из ${limit.onPitch}`})`;
         } else {
           saveBtn.disabled = false;
           saveBtn.title = '';
@@ -11584,30 +11668,12 @@ function lineupForm(box, f, c, withT, app) {
     const wrap = box.querySelector('#subs_editor');
     if (!wrap) return;
     const { sPids, bPids } = getSelected();
-    const sSet = new Set(sPids);
-    const bSet = new Set(bPids);
     if (sPids.length < 11 || bPids.length === 0) {
       wrap.innerHTML = `<div style="font-weight:700;font-size:13px;margin-bottom:4px">🔄 Плановые замены на матч (до 5 замен в 3 слота)</div><div class="muted small">Чтобы поставить замены, выберите 11 игроков в стартовый состав и хотя бы 1 игрока на скамейку.</div>`;
+      cnt();
       return;
     }
-    const validSubs = [];
-    const usedIn = new Set();
-    const usedOut = new Set();
-    const onPitch = new Set(sSet);
-    const sorted = currentPlannedSubs
-      .map((item, origIdx) => ({ ...item, origIdx }))
-      .sort((a, b) => a.minute - b.minute || a.origIdx - b.origIdx);
-    for (const ps of sorted) {
-      if (validSubs.length >= 5) break;
-      if (!ps.outPid || !ps.inPid || ps.outPid === ps.inPid) continue;
-      if (!bSet.has(ps.inPid) || usedIn.has(ps.inPid)) continue;
-      if (!onPitch.has(ps.outPid) || usedOut.has(ps.outPid)) continue;
-      usedIn.add(ps.inPid);
-      usedOut.add(ps.outPid);
-      onPitch.delete(ps.outPid);
-      onPitch.add(ps.inPid);
-      validSubs.push({ minute: ps.minute, outPid: ps.outPid, inPid: ps.inPid, condition: ps.condition || 'always' });
-    }
+    const validSubs = getNormalizedPlannedSubs(sPids, bPids);
     currentPlannedSubs = validSubs;
 
     const distinctTimes = [];
@@ -11615,25 +11681,29 @@ function lineupForm(box, f, c, withT, app) {
       if (!distinctTimes.length || tSec - distinctTimes[distinctTimes.length - 1] > 90) distinctTimes.push(tSec);
     }
     const tooManyWindows = distinctTimes.length > 3;
-
-    const legionWarn = isRpl && validSubs.some(ps => {
-      const pOut = poolById[ps.outPid], pIn = poolById[ps.inPid];
-      return pOut && !pOut.isLegionnaire && pIn && pIn.isLegionnaire;
-    });
+    const subSim = simulateSubsLegionClient(validSubs, sPids);
+    const hasLegSubChange = isRpl && validSubs.some((_, k) => (subSim.rowStates[k]?.delta || 0) !== 0);
 
     const rowsHtml = validSubs.map((ps, idx) => {
       const outCandidates = [...sPids, ...validSubs.slice(0, idx).map(x => x.inPid)].filter((pid, k, arr) => arr.indexOf(pid) === k && (pid === ps.outPid || !validSubs.some((o, oi) => oi !== idx && o.outPid === pid)));
       const inCandidates = bPids.filter(pid => pid === ps.inPid || !validSubs.some((o, oi) => oi !== idx && o.inPid === pid));
       const outOpts = outCandidates.map(pid => {
         const p = poolById[pid];
-        return `<option value="${e(pid)}" ${pid === ps.outPid ? 'selected' : ''}>${e(clientPosLabel(p || '?'))} · ${e(p?.name || pid)}</option>`;
+        const legHint = isRpl && p?.isLegionnaire ? ' [Лег]' : '';
+        return `<option value="${e(pid)}" ${pid === ps.outPid ? 'selected' : ''}>${e(clientPosLabel(p || '?'))} · ${e(p?.name || pid)}${legHint}</option>`;
       }).join('');
       const inOpts = inCandidates.map(pid => {
         const p = poolById[pid];
-        return `<option value="${e(pid)}" ${pid === ps.inPid ? 'selected' : ''}>${e(clientPosLabel(p || '?'))} · ${e(p?.name || pid)}</option>`;
+        const legHint = isRpl && p?.isLegionnaire ? ' [Лег]' : '';
+        return `<option value="${e(pid)}" ${pid === ps.inPid ? 'selected' : ''}>${e(clientPosLabel(p || '?'))} · ${e(p?.name || pid)}${legHint}</option>`;
       }).join('');
       const condOpts = SUB_COND_OPTIONS.map(([val, lbl]) => `<option value="${val}" ${ps.condition === val ? 'selected' : ''}>${lbl}</option>`).join('');
-      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);flex-wrap:wrap">
+      const stInfo = subSim.rowStates[idx];
+      const rowIsOver = isRpl && stInfo?.isOver;
+      const legBadge = isRpl && stInfo
+        ? `<span class="tag" style="font-size:11px;white-space:nowrap;${rowIsOver ? 'background:#fee2e2;color:#991b1b;border-color:#fca5a5;font-weight:700' : 'background:rgba(22,163,74,.1);color:#15803d;border-color:rgba(22,163,74,.28)'}">${rowIsOver ? '⛔' : '⚡'} ${stInfo.projected}/${limit.onPitch} лег.</span>`
+        : '';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:${rowIsOver ? '7px 8px' : '6px 0'};border-bottom:1px dashed var(--line);flex-wrap:wrap;${rowIsOver ? 'background:rgba(220,38,38,.06);border:1px solid rgba(220,38,38,.3);border-radius:7px;margin:4px 0' : ''}">
         <label class="small" style="display:flex;align-items:center;gap:4px;margin:0;white-space:nowrap">
           <span>Мин:</span>
           <input type="number" min="1" max="90" class="sub-min-inp" data-sub-idx="${idx}" value="${ps.minute}" style="width:62px;padding:4px 6px;text-align:center;font-weight:700">
@@ -11647,6 +11717,7 @@ function lineupForm(box, f, c, withT, app) {
           <select class="sub-in-pick" data-sub-idx="${idx}" style="flex:1;min-width:120px">${inOpts}</select>
         </div>
         <select class="sub-cond-pick" data-sub-idx="${idx}" style="min-width:140px">${condOpts}</select>
+        ${legBadge}
         <button type="button" class="btn sm alt sub-del-btn" data-sub-idx="${idx}" title="Удалить замену" style="padding:3px 8px">✕</button>
       </div>`;
     }).join('');
@@ -11663,7 +11734,8 @@ function lineupForm(box, f, c, withT, app) {
       <div class="muted small" style="margin-bottom:${validSubs.length ? '6px' : '0'}">Укажите минуту, кого заменить и при каком счёте проводить замену. На одну и ту же минуту можно поставить несколько замен (одно окно).</div>
       ${rowsHtml ? `<div>${rowsHtml}</div>` : ''}
       ${tooManyWindows ? `<div style="margin-top:8px;padding:7px 10px;border-radius:6px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;font-size:12px"><b>⚠ Превышено число окон замен (${distinctTimes.length} из 3):</b> по правилам допускается максимум 3 остановки для замен (5 игроков). Объедините часть замен на одну минуту.</div>` : ''}
-      ${legionWarn ? `<div style="margin-top:8px;padding:7px 10px;border-radius:6px;background:#fffbeb;border:1px solid #fcd34d;color:#b45309;font-size:12px"><b>ℹ Лимит легионеров:</b> при замене россиянина на легионера следите, чтобы на поле одновременно оставалось не больше ${limit.onPitch} легионеров.</div>` : ''}
+      ${isRpl && subSim.issues.length ? `<div style="margin-top:8px;padding:8px 10px;border-radius:6px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;font-size:12px"><b>⛔ Превышен лимит легионеров при заменах (максимум ${limit.onPitch} на поле):</b> ${e(subSim.issues.join('; '))}. Сначала выпустите игрока РФ/ЕАЭС вместо легионера либо объедините встречные замены на одну минуту с тем же условием.</div>` : ''}
+      ${isRpl && !subSim.issues.length && hasLegSubChange ? `<div style="margin-top:8px;padding:7px 10px;border-radius:6px;background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;font-size:12px"><b>✅ Лимит легионеров при заменах соблюдён:</b> одновременно на поле не более ${subSim.maxLeg} из ${limit.onPitch} легионеров.</div>` : ''}
     `;
 
     wrap.querySelector('#add_sub_btn')?.addEventListener('click', () => {
@@ -11703,6 +11775,7 @@ function lineupForm(box, f, c, withT, app) {
       sel.addEventListener('change', () => {
         const idx = Number(sel.dataset.subIdx);
         if (currentPlannedSubs[idx]) currentPlannedSubs[idx].condition = sel.value;
+        renderSubsEditor();
       });
     });
     wrap.querySelectorAll('.sub-del-btn').forEach(btn => {
@@ -11712,6 +11785,7 @@ function lineupForm(box, f, c, withT, app) {
         renderSubsEditor();
       });
     });
+    cnt();
   };
 
   cnt();
@@ -11884,6 +11958,17 @@ function lineupForm(box, f, c, withT, app) {
 
   box.querySelector('.save').onclick = async () => {
     const { sPids: starters, bPids: bench } = getSelected();
+    const validSubs = getNormalizedPlannedSubs(starters, bench);
+    currentPlannedSubs = validSubs;
+    if (isRpl) {
+      const subSim = simulateSubsLegionClient(validSubs, starters);
+      if (subSim.starterLeg > limit.onPitch) {
+        return toast(`Превышен лимит легионеров в старте (${subSim.starterLeg}/${limit.onPitch})`, 1);
+      }
+      if (!subSim.ok) {
+        return toast(`Превышен лимит легионеров при заменах: ${subSim.issues[0] || `до ${subSim.maxLeg}/${limit.onPitch}`}`, 1);
+      }
+    }
     const rolesPayload = {};
     box.querySelectorAll('.role-pick').forEach(sel => {
       if (sel.value) rolesPayload[sel.dataset.role] = sel.value;

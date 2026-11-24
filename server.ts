@@ -449,7 +449,97 @@ var SUB_COND_LABELS: Record<string, string> = {
   not_winning: "если не ведём (ничья/проигрыш)",
   tired: "при усталости игрока"
 };
-function normalizePlannedSubs(rawSubs: any, starters: string[], bench: string[]) {
+function getFixtureLegionLimit(f: any, tid?: string) {
+  if (!f || isIntraSquad(f) || f.comp === FRIENDLY_COMP || f.comp === "friendly" || f.comp === "friendly_match" || f.comp === "national") return null;
+  if (f.comp === "rpl" || f.comp === "cup" || f.comp === "supercup" || (tid && team(tid)?.comp === "rpl" && f.comp !== "fnl")) {
+    return getRplLegionLimit(f.season || S());
+  }
+  return null;
+}
+function isCtxPidLegionnaire(ctx: any, pid: string): boolean {
+  if (!pid) return false;
+  if (ctx?.isLeg && typeof ctx.isLeg[pid] === "boolean") return ctx.isLeg[pid];
+  const p = player(pid);
+  return p ? isLegionnaire(p) : false;
+}
+function evaluatePlannedSubsLegionLimit(
+  subs: any[],
+  starters: string[],
+  limitOnPitch: number | null,
+  dropViolations = false
+): { ok: boolean; validSubs: any[]; starterLegion: number; maxLegion: number; error: string | null } {
+  const isLegPid = (pid: string) => isLegionnaire(player(pid));
+  const starterLegion = starters.filter(isLegPid).length;
+  if (limitOnPitch == null) {
+    return { ok: true, validSubs: [...subs], starterLegion, maxLegion: starterLegion, error: null };
+  }
+  const validSubs: any[] = [];
+  let curAlwaysLeg = starterLegion;
+  let extraCondLeg = 0;
+  let maxLegion = starterLegion;
+  const errors: string[] = [];
+
+  let i = 0;
+  while (i < subs.length) {
+    const minVal = subs[i].minute;
+    const condVal = subs[i].condition || "always";
+    let j = i;
+    while (j < subs.length && subs[j].minute === minVal && (subs[j].condition || "always") === condVal) j++;
+    const batch = subs.slice(i, j);
+    const batchDelta = batch.reduce((acc, ps) => acc + ((isLegPid(ps.inPid) ? 1 : 0) - (isLegPid(ps.outPid) ? 1 : 0)), 0);
+    const projected = curAlwaysLeg + extraCondLeg + batchDelta;
+
+    if (projected <= limitOnPitch) {
+      if (projected > maxLegion) maxLegion = projected;
+      validSubs.push(...batch);
+      if (condVal === "always") curAlwaysLeg += batchDelta;
+      else if (batchDelta > 0) extraCondLeg += batchDelta;
+    } else if (dropViolations) {
+      // Keep non-increasing subs (Leg->Rus or Rus->Rus) and drop only subs that would breach the limit
+      const sortedBatch = [...batch].sort((a, b) => {
+        const da = (isLegPid(a.inPid) ? 1 : 0) - (isLegPid(a.outPid) ? 1 : 0);
+        const db = (isLegPid(b.inPid) ? 1 : 0) - (isLegPid(b.outPid) ? 1 : 0);
+        return da - db;
+      });
+      let localDelta = 0;
+      for (const ps of sortedBatch) {
+        const d = (isLegPid(ps.inPid) ? 1 : 0) - (isLegPid(ps.outPid) ? 1 : 0);
+        if (curAlwaysLeg + extraCondLeg + localDelta + d <= limitOnPitch) {
+          validSubs.push(ps);
+          localDelta += d;
+        }
+      }
+      const nextProj = curAlwaysLeg + extraCondLeg + localDelta;
+      if (nextProj > maxLegion) maxLegion = nextProj;
+      if (condVal === "always") curAlwaysLeg += localDelta;
+      else if (localDelta > 0) extraCondLeg += localDelta;
+    } else {
+      if (projected > maxLegion) maxLegion = projected;
+      const culprit = batch.find((ps) => isLegPid(ps.inPid) && !isLegPid(ps.outPid)) || batch[0];
+      const inName = player(culprit.inPid)?.name || culprit.inPid;
+      const outName = player(culprit.outPid)?.name || culprit.outPid;
+      const condNote = condVal === "always" && extraCondLeg > 0
+        ? " (с учётом ранее запланированных условных замен)"
+        : (condVal !== "always" ? " (при срабатывании условия замены)" : "");
+      errors.push(`замена на ${minVal}' (${inName} вместо ${outName}) даёт ${projected}/${limitOnPitch} легионеров на поле${condNote}`);
+      validSubs.push(...batch);
+      if (condVal === "always") curAlwaysLeg += batchDelta;
+      else if (batchDelta > 0) extraCondLeg += batchDelta;
+    }
+    i = j;
+  }
+
+  return {
+    ok: errors.length === 0 && starterLegion <= limitOnPitch,
+    validSubs,
+    starterLegion,
+    maxLegion,
+    error: errors.length
+      ? `Превышен лимит легионеров на поле при заменах (максимум ${limitOnPitch}): ${errors.join("; ")}. Сначала замените легионера на россиянина или игрока из ЕАЭС либо объедините встречные замены на одну минуту.`
+      : null
+  };
+}
+function normalizePlannedSubs(rawSubs: any, starters: string[], bench: string[], opts?: { legionLimitOnPitch?: number | null }) {
   if (!Array.isArray(rawSubs) || !starters.length || !bench.length) return [];
   const starterSet = new Set(starters);
   const benchSet = new Set(bench);
@@ -484,6 +574,9 @@ function normalizePlannedSubs(rawSubs: any, starters: string[], bench: string[])
       condition: item.condition,
       ...(item.note ? { note: item.note } : {})
     });
+  }
+  if (opts?.legionLimitOnPitch != null) {
+    return evaluatePlannedSubsLegionLimit(out, starters, opts.legionLimitOnPitch, true).validSubs;
   }
   return out;
 }
@@ -11293,7 +11386,8 @@ function sanitizeLineupForFixture(L: any, tid: string, f: any) {
   }
   const stSet = new Set(starters);
   const slots = Array.isArray(L.slots) ? L.slots.filter((s: any) => s && stSet.has(s.pid)) : void 0;
-  const plannedSubs = normalizePlannedSubs(L.plannedSubs, starters, bench);
+  const legLimit = getFixtureLegionLimit(f, tid);
+  const plannedSubs = normalizePlannedSubs(L.plannedSubs, starters, bench, { legionLimitOnPitch: legLimit?.onPitch ?? null });
   return {
     ...L,
     starters,
@@ -11340,8 +11434,7 @@ function fixLineup(L, tid, f, allowLoan = false, excludePids?: Set<string>) {
   const F = parseFormation(L.formation);
   const used = /* @__PURE__ */ new Set();
   const starters = [];
-  const isRpl = f.comp === "rpl";
-  const limit = isRpl ? getRplLegionLimit(S()) : null;
+  const limit = getFixtureLegionLimit(f, tid);
   let legCount = 0;
   for (const id of L.starters || []) {
     if (ok.has(id) && !used.has(id)) {
@@ -11420,7 +11513,7 @@ function fixLineup(L, tid, f, allowLoan = false, excludePids?: Set<string>) {
   const allValidIds = new Set([...ownIds, ...loaned.map((p) => p.id)]);
   const rolesSource = (intra && !L.roles) ? {} : db.tactics?.[tid]?.roles;
   const mergedRoles = { ...normalizeRoles(rolesSource, allValidIds), ...normalizeRoles(L.roles, allValidIds) };
-  const plannedSubs = normalizePlannedSubs(L.plannedSubs, orderedStarters, finalBench);
+  const plannedSubs = normalizePlannedSubs(L.plannedSubs, orderedStarters, finalBench, { legionLimitOnPitch: limit?.onPitch ?? null });
   return {
     formation: fm,
     starters: orderedStarters,
@@ -11826,7 +11919,7 @@ function computePlayerFatigue(tid: string, f: any) {
   };
   return { forPlayer, teamRecent14Count };
 }
-function cardLine(p, date, opts?: { slotInfo?: any; fatigueInfo?: any; roleNames?: string[]; compId?: string | null }) {
+function cardLine(p, date, opts?: { slotInfo?: any; fatigueInfo?: any; roleNames?: string[]; compId?: string | null; showLegionTag?: boolean }) {
   if (!p) return "\u0418\u0433\u0440\u043E\u043A (\u043D\u0435\u0442 \u0434\u0430\u043D\u043D\u044B\u0445)";
   const a = age(p, date), ag = agg().P;
   let seas = "";
@@ -11848,13 +11941,39 @@ function cardLine(p, date, opts?: { slotInfo?: any; fatigueInfo?: any; roleNames
   const fatTag = opts?.fatigueInfo?.label ? ` Физическая готовность: ${opts.fatigueInfo.label}.` : "";
   const rolesTag = opts?.roleNames?.length ? ` Штатные роли: ${opts.roleNames.join(", ")}.` : "";
   const ratingTag = Number.isFinite(+p.rating) ? `, рейтинг ${Math.round(+p.rating)}` : "";
-  return `${playerPosLabel(p)} ${p.name}${slotTag}${a ? `, ${a} лет` : ""}${ratingTag}${nat}${foot}${real} — стиль: ${p.style || "сбалансированный"}. Достижения: ${(p.achievements || []).join("; ") || "опыт выступлений"}. Статистика 2 сезонов: ${p.stats2y || "регулярная игровая практика"}. Форма: ${p.form || "стабильная"}.${seas}${fatTag}${rolesTag} Характер: ${p.character || "хладнокровный, командный игрок"}. Новости: ${p.news || "готовится к матчу в штатном режиме"}.`;
+  const legTag = opts?.showLegionTag ? (isLegionnaire(p) ? " [ЛЕГИОНЕР]" : " [РФ/ЕАЭС — не легионер]") : "";
+  return `${playerPosLabel(p)} ${p.name}${legTag}${slotTag}${a ? `, ${a} лет` : ""}${ratingTag}${nat}${foot}${real} — стиль: ${p.style || "сбалансированный"}. Достижения: ${(p.achievements || []).join("; ") || "опыт выступлений"}. Статистика 2 сезонов: ${p.stats2y || "регулярная игровая практика"}. Форма: ${p.form || "стабильная"}.${seas}${fatTag}${rolesTag} Характер: ${p.character || "хладнокровный, командный игрок"}. Новости: ${p.news || "готовится к матчу в штатном режиме"}.`;
 }
 async function buildCtx(f) {
   const intra = isIntraSquad(f);
   const hDispName = sideDisplayName(f, "home");
   const aDispName = sideDisplayName(f, "away");
-  const ctx: any = { fid: f.id, intraSquad: intra, compId: normDiscComp(f.comp), comp: compName(f), roundLabel: roundLabel(f), date: f.date, time: f.time, names: {}, pidSide: {}, pidTeam: {}, pos: {}, positions: {}, slotPos: {}, slotFit: {}, fatigue: { home: {}, away: {} }, roles: { home: {}, away: {} }, lineup: {}, sides: {}, loan: {} };
+  const limHome = getFixtureLegionLimit(f, f.home);
+  const limAway = getFixtureLegionLimit(f, f.away);
+  const ctx: any = {
+    fid: f.id,
+    intraSquad: intra,
+    compId: normDiscComp(f.comp),
+    comp: compName(f),
+    roundLabel: roundLabel(f),
+    date: f.date,
+    time: f.time,
+    names: {},
+    pidSide: {},
+    pidTeam: {},
+    pos: {},
+    positions: {},
+    isLeg: {},
+    slotPos: {},
+    slotFit: {},
+    fatigue: { home: {}, away: {} },
+    roles: { home: {}, away: {} },
+    lineup: {},
+    sides: {},
+    loan: {},
+    legionLimit: limHome || limAway || null,
+    legionLimitBySide: { home: limHome?.onPitch ?? null, away: limAway?.onPitch ?? null }
+  };
   const H = team(f.home), A = team(f.away);
   const lpH = teamLeagueProfile(H), lpA = teamLeagueProfile(A);
   ctx.sides = {
@@ -11912,6 +12031,7 @@ async function buildCtx(f) {
         ctx.pidSide[dummyId] = s;
         ctx.pidTeam[dummyId] = tid;
         ctx.pos[dummyId] = pPos;
+        ctx.isLeg[dummyId] = false;
         L.starters.push(dummyId);
       }
     } else {
@@ -11922,6 +12042,7 @@ async function buildCtx(f) {
           ctx.pidSide[pid] = s;
           ctx.pidTeam[pid] = tid;
           ctx.pos[pid] = p.pos;
+          ctx.isLeg[pid] = isLegionnaire(p);
           if (!ctx.positions) ctx.positions = {};
           ctx.positions[pid] = playerPositions(p);
           const lf = loanFromName(tid, pid);
@@ -12112,21 +12233,29 @@ function lineText(ctx, s) {
   const roles = ctx.roles?.[s] || L?.roles || {};
   const fatMap = ctx.fatigue?.[s] || {};
   const compKey = ctx.compId || null;
+  const sideLegLim = ctx.legionLimitBySide?.[s] ?? null;
+  const showLegionTag = sideLegLim != null;
   const rowStarter = (pid) => cardLine(player(pid), f, {
     slotInfo: ctx.slotPos?.[pid] ? { slotPos: ctx.slotPos[pid], fit: ctx.slotFit?.[pid] } : undefined,
     fatigueInfo: fatMap[pid],
     roleNames: playerRolesFor(roles, pid),
-    compId: compKey
+    compId: compKey,
+    showLegionTag
   });
   const rowBench = (pid) => cardLine(player(pid), f, {
     fatigueInfo: fatMap[pid],
     roleNames: playerRolesFor(roles, pid),
-    compId: compKey
+    compId: compKey,
+    showLegionTag
   });
   const ycSummary = compKey
     ? [...L.starters, ...L.bench].map((pid) => player(pid)).filter((p) => p && (p.ycByComp?.[compKey] || 0) % 4 > 0).map((p) => `${p.name} \u2014 ${(p.ycByComp?.[compKey] || 0) % 4}/4`).join(", ")
     : "";
-  return `\u0421\u041E\u0421\u0422\u0410\u0412 ${sd.name}${sd.leagueName ? ` [${sd.leagueName}${sd.tier ? `, ${sd.tier}-\u0439 \u0443\u0440\u043E\u0432\u0435\u043D\u044C` : ""}]` : ""} (\u0441\u0445\u0435\u043C\u0430 ${L.formation}), \u0441\u0442\u0430\u0440\u0442\u043E\u0432\u044B\u0435 11:
+  const starterLegCount = showLegionTag ? L.starters.filter((pid) => isCtxPidLegionnaire(ctx, pid)).length : 0;
+  const legHeader = showLegionTag
+    ? `\nЛимит легионеров на поле (${sd.name}): сейчас в старте ${starterLegCount}/${sideLegLim} (в любой момент матча на поле максимум ${sideLegLim} игроков с меткой [ЛЕГИОНЕР]).`
+    : "";
+  return `\u0421\u041E\u0421\u0422\u0410\u0412 ${sd.name}${sd.leagueName ? ` [${sd.leagueName}${sd.tier ? `, ${sd.tier}-\u0439 \u0443\u0440\u043E\u0432\u0435\u043D\u044C` : ""}]` : ""} (\u0441\u0445\u0435\u043C\u0430 ${L.formation}), \u0441\u0442\u0430\u0440\u0442\u043E\u0432\u044B\u0435 11:${legHeader}
 ${L.starters.map((p) => "- " + rowStarter(p)).join("\n")}
 \u0421\u043A\u0430\u043C\u0435\u0439\u043A\u0430 \u0437\u0430\u043F\u0430\u0441\u043D\u044B\u0445:
 ${L.bench.map((p) => "- " + rowBench(p)).join("\n")}
@@ -12185,6 +12314,12 @@ function buildUser(ctx, a, b, st, issues, mode = "full") {
 `;
     u += `- Использовано замен: ${H} ${st.subs.home}/5 игроков в ${st.slots.home}/3 окнах, ${A} ${st.subs.away}/5 игроков в ${st.slots.away}/3 окнах (вышли: ${st.ins.join(", ") || "нет"}). Новое окно замен открывать можно, только если использовано меньше 3.
 `;
+    if ((ctx.legionLimitBySide?.home != null || ctx.legionLimitBySide?.away != null) && st.legOnPitch) {
+      const limH = ctx.legionLimitBySide?.home;
+      const limA = ctx.legionLimitBySide?.away;
+      u += `- Легионеров сейчас на поле: ${limH != null ? `${H} — ${st.legOnPitch.home}/${limH}` : `${H} — без лимита`}, ${limA != null ? `${A} — ${st.legOnPitch.away}/${limA}` : `${A} — без лимита`}.
+`;
+    }
     if (st.note) u += `- Ход игры и моментум: ${st.note}
 `;
     u += `- Хроника последних минут: ${st.last.join(" | ") || "начало встречи"}
@@ -12321,6 +12456,11 @@ ${tiredNotes("away", A)}
   }
   u += `8. \u0421\u041E\u0421\u0422\u0410\u0412\u042B \u0418 \u041F\u0420\u041E\u0424\u0418\u041B\u0418 \u0418\u0413\u0420\u041E\u041A\u041E\u0412 (\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0439 \u0438\u0441\u043A\u043B\u044E\u0447\u0438\u0442\u0435\u043B\u044C\u043D\u043E \u044D\u0442\u0438\u0445 \u0438\u0433\u0440\u043E\u043A\u043E\u0432):
 `;
+  if (ctx.legionLimitBySide?.home != null || ctx.legionLimitBySide?.away != null) {
+    const limN = ctx.legionLimitBySide?.home ?? ctx.legionLimitBySide?.away;
+    u += `- СТРОГИЙ ЛИМИТ ЛЕГИОНЕРОВ ПРИ ЗАМЕНАХ: в любой момент матча на поле одновременно может быть НЕ БОЛЕЕ ${limN} игроков со статусом [ЛЕГИОНЕР] (игроки [РФ/ЕАЭС — не легионер] в лимит не входят). Если на поле уже ${limN} легионеров — выпускать со скамейки [ЛЕГИОНЕР] можно ТОЛЬКО вместо уходящего [ЛЕГИОНЕР] (либо в ту же минуту/окно с обратной заменой легионера на игрока РФ/ЕАЭС), но НЕ вместо [РФ/ЕАЭС]!
+`;
+  }
   u += `${lineText(ctx, "home")}
 
 ${lineText(ctx, "away")}
@@ -12590,7 +12730,11 @@ function resolve(idx, name, side) {
   return pick(idx.filter((x) => x.last === last));
 }
 function deriveState(events, ctx, note?: any) {
-  const st = { score: [0, 0], scorers: [] as string[], yellows: { home: [], away: [] }, reds: [], off: [], subs: { home: 0, away: 0 }, subT: { home: [], away: [] }, slots: { home: 0, away: 0 }, ins: [], note: note || "", last: events.slice(-8).map((e) => `${e.min}' ${e.text}`) };
+  const st = { score: [0, 0], scorers: [] as string[], yellows: { home: [], away: [] }, reds: [], off: [], subs: { home: 0, away: 0 }, subT: { home: [], away: [] }, slots: { home: 0, away: 0 }, ins: [], legOnPitch: { home: 0, away: 0 }, note: note || "", last: events.slice(-8).map((e) => `${e.min}' ${e.text}`) };
+  const onPitchIds: Record<"home" | "away", Set<string>> = {
+    home: new Set<string>(ctx?.lineup?.home?.starters || []),
+    away: new Set<string>(ctx?.lineup?.away?.starters || [])
+  };
   for (const e of events) {
     if (e.type === "goal" || e.type === "own_goal") {
       st.score[e.team === "home" ? 0 : 1]++;
@@ -12603,16 +12747,35 @@ function deriveState(events, ctx, note?: any) {
     if (e.type === "red" && nm(0)) {
       st.reds.push(nm(0));
       st.off.push(nm(0));
+      const sd = ctx?.pidSide?.[e.pids?.[0]] || e.team;
+      if ((sd === "home" || sd === "away") && e.pids?.[0]) onPitchIds[sd].delete(e.pids[0]);
     }
     if (e.type === "sub") {
       st.subs[e.team]++;
       st.subT[e.team]?.push(e.min * 60 + (e.sec || 0));
       if (nm(1)) st.off.push(nm(1));
       if (nm(0)) st.ins.push(nm(0));
+      const sd = (e.team === "home" || e.team === "away") ? e.team : (ctx?.pidSide?.[e.pids?.[0]] || ctx?.pidSide?.[e.pids?.[1]]);
+      if (sd === "home" || sd === "away") {
+        let inP = e.pids?.[0], outP = e.pids?.[1];
+        if (inP && outP && onPitchIds[sd].has(inP) && !onPitchIds[sd].has(outP)) {
+          [inP, outP] = [outP, inP];
+        }
+        if (outP) onPitchIds[sd].delete(outP);
+        if (inP) onPitchIds[sd].add(inP);
+      }
     }
-    if (e.type === "injury" && nm(0) && (e.out_days === void 0 || e.out_days > 0)) st.off.push(nm(0));
+    if (e.type === "injury" && nm(0) && (e.out_days === void 0 || e.out_days > 0)) {
+      st.off.push(nm(0));
+      const sd = ctx?.pidSide?.[e.pids?.[0]] || e.team;
+      if ((sd === "home" || sd === "away") && e.pids?.[0]) onPitchIds[sd].delete(e.pids[0]);
+    }
   }
   st.slots = { home: subWindows(st.subT.home), away: subWindows(st.subT.away) };
+  st.legOnPitch = {
+    home: [...onPitchIds.home].filter((pid) => isCtxPidLegionnaire(ctx, pid)).length,
+    away: [...onPitchIds.away].filter((pid) => isCtxPidLegionnaire(ctx, pid)).length
+  };
   return st;
 }
 function isDisallowedGoalText(txt: string) {
@@ -12662,7 +12825,7 @@ function buildVarPauseCommentaryBeat(cur: any, nxt: any, ctx: any, beatIdx: numb
   return buildRichVarBeat(cur, nxt, ctx, beatIdx, totalBeats, usedTexts);
 }
 var CRITICAL_EVENT_TYPES = /* @__PURE__ */ new Set(["goal", "own_goal", "red", "penalty", "var"]);
-function normalizeEvents(raw, a, b, ctx, prev, minEv = 3) {
+function normalizeEvents(raw, a, b, ctx, prev, minEv = 3, opts?: { strictLegionSub?: boolean }) {
   if (!Array.isArray(raw) || raw.length < minEv) throw new Error("\u0441\u043B\u0438\u0448\u043A\u043E\u043C \u043C\u0430\u043B\u043E \u0441\u043E\u0431\u044B\u0442\u0438\u0439");
   const idx = indexNames(ctx), probs = [], fatalProbs: string[] = [], unknown = /* @__PURE__ */ new Set();
   const st = deriveState(prev, ctx);
@@ -12802,6 +12965,145 @@ function normalizeEvents(raw, a, b, ctx, prev, minEv = 3) {
     out.push(ev);
   }
   out = out.map((e, i) => ({ e, i })).sort((x, y) => x.e.min * 60 + x.e.sec - (y.e.min * 60 + y.e.sec) || x.i - y.i).map((x) => x.e);
+  // Enforce on-pitch legionnaire limit across all substitutions in RPL/Cup matches
+  {
+    const limBySide: Record<"home" | "away", number | null> = {
+      home: ctx?.legionLimitBySide?.home ?? (ctx?.compId === "rpl" && !ctx?.intraSquad ? getRplLegionLimit(S()).onPitch : null),
+      away: ctx?.legionLimitBySide?.away ?? (ctx?.compId === "rpl" && !ctx?.intraSquad ? getRplLegionLimit(S()).onPitch : null)
+    };
+    if (limBySide.home != null || limBySide.away != null) {
+      const pitchBySide: Record<"home" | "away", Set<string>> = {
+        home: new Set<string>(ctx?.lineup?.home?.starters || []),
+        away: new Set<string>(ctx?.lineup?.away?.starters || [])
+      };
+      const subbedInSoFar = new Set<string>();
+      const offPitchSoFar = new Set<string>();
+      for (const pe of (prev || [])) {
+        if (!pe) continue;
+        if (pe.type === "red" && pe.pids?.[0]) {
+          const sd = ctx?.pidSide?.[pe.pids[0]] || pe.team;
+          if (sd === "home" || sd === "away") pitchBySide[sd].delete(pe.pids[0]);
+          offPitchSoFar.add(pe.pids[0]);
+        } else if (pe.type === "injury" && pe.pids?.[0] && (pe.out_days === void 0 || pe.out_days > 0)) {
+          const sd = ctx?.pidSide?.[pe.pids[0]] || pe.team;
+          if (sd === "home" || sd === "away") pitchBySide[sd].delete(pe.pids[0]);
+          offPitchSoFar.add(pe.pids[0]);
+        } else if (pe.type === "sub") {
+          const sd = (pe.team === "home" || pe.team === "away") ? pe.team : (ctx?.pidSide?.[pe.pids?.[0]] || ctx?.pidSide?.[pe.pids?.[1]]);
+          if (sd === "home" || sd === "away") {
+            let inP = pe.pids?.[0], outP = pe.pids?.[1];
+            if (inP && outP && pitchBySide[sd].has(inP) && !pitchBySide[sd].has(outP)) {
+              [inP, outP] = [outP, inP];
+            }
+            if (outP) { pitchBySide[sd].delete(outP); offPitchSoFar.add(outP); }
+            if (inP) { pitchBySide[sd].add(inP); subbedInSoFar.add(inP); }
+          }
+        }
+      }
+      const cancelledSubIndices = new Set<number>();
+      const droppedSubbedInPids = new Set<string>();
+      const criticalAfterIdx = (fromIdx: number, pid: string) => {
+        for (let k = fromIdx + 1; k < out.length; k++) {
+          const evk = out[k];
+          if (["goal", "own_goal", "red", "yellow", "penalty"].includes(evk.type) && Array.isArray(evk.pids) && evk.pids.includes(pid)) {
+            return true;
+          }
+        }
+        return false;
+      };
+      for (let idx = 0; idx < out.length; idx++) {
+        const cur = out[idx];
+        if (!cur || cancelledSubIndices.has(idx) || cur._legionChecked) continue;
+        if (cur.type === "red" && cur.pids?.[0]) {
+          const sd = ctx?.pidSide?.[cur.pids[0]] || cur.team;
+          if (sd === "home" || sd === "away") pitchBySide[sd].delete(cur.pids[0]);
+          offPitchSoFar.add(cur.pids[0]);
+          continue;
+        }
+        if (cur.type === "injury" && cur.pids?.[0] && (cur.out_days === void 0 || cur.out_days > 0)) {
+          const sd = ctx?.pidSide?.[cur.pids[0]] || cur.team;
+          if (sd === "home" || sd === "away") pitchBySide[sd].delete(cur.pids[0]);
+          offPitchSoFar.add(cur.pids[0]);
+          continue;
+        }
+        if (cur.type !== "sub") continue;
+        const sd = (cur.team === "home" || cur.team === "away") ? cur.team : (ctx?.pidSide?.[cur.pids?.[0]] || ctx?.pidSide?.[cur.pids?.[1]]);
+        if (sd !== "home" && sd !== "away") continue;
+        const sideLim = limBySide[sd];
+        if (sideLim == null) {
+          let inP = cur.pids?.[0], outP = cur.pids?.[1];
+          if (inP && outP && pitchBySide[sd].has(inP) && !pitchBySide[sd].has(outP)) {
+            [inP, outP] = [outP, inP];
+            cur.pids = [inP, outP];
+            cur.players = [ctx.names?.[inP], ctx.names?.[outP]].filter(Boolean);
+          }
+          if (outP) { pitchBySide[sd].delete(outP); offPitchSoFar.add(outP); }
+          if (inP) { pitchBySide[sd].add(inP); subbedInSoFar.add(inP); }
+          continue;
+        }
+        // Gather all sub events for this side at the same minute so simultaneous swaps evaluate together
+        const groupIdxs: number[] = [idx];
+        for (let k = idx + 1; k < out.length; k++) {
+          const ek = out[k];
+          if (ek.min !== cur.min) break;
+          if (ek.type === "red" || (ek.type === "injury" && (ek.out_days === void 0 || ek.out_days > 0))) {
+            const sk = (ek.team === "home" || ek.team === "away") ? ek.team : (ctx?.pidSide?.[ek.pids?.[0]]);
+            if (sk === sd) break;
+          }
+          if (ek.type === "sub") {
+            const sk = (ek.team === "home" || ek.team === "away") ? ek.team : (ctx?.pidSide?.[ek.pids?.[0]] || ctx?.pidSide?.[ek.pids?.[1]]);
+            if (sk === sd) groupIdxs.push(k);
+          }
+        }
+        if (groupIdxs.length > 1 && idx !== groupIdxs[0]) continue; // already processed with group
+        // Normalize swapped [out, in] and sort -1 (leg out) before +1 (leg in)
+        const groupItems = groupIdxs.map((gi) => {
+          const evg = out[gi];
+          let inP = evg.pids?.[0], outP = evg.pids?.[1];
+          if (inP && outP && pitchBySide[sd].has(inP) && !pitchBySide[sd].has(outP)) {
+            [inP, outP] = [outP, inP];
+            evg.pids = [inP, outP];
+            evg.players = [ctx.names?.[inP], ctx.names?.[outP]].filter(Boolean);
+          }
+          const delta = (inP && isCtxPidLegionnaire(ctx, inP) ? 1 : 0) - (outP && isCtxPidLegionnaire(ctx, outP) ? 1 : 0);
+          return { gi, evg, inP, outP, delta };
+        }).sort((x, y) => x.delta - y.delta || x.gi - y.gi);
+
+        for (const item of groupItems) {
+          const curLeg = [...pitchBySide[sd]].filter((pid) => isCtxPidLegionnaire(ctx, pid)).length;
+          const nextLeg = curLeg + item.delta;
+          if (nextLeg > sideLim) {
+            const tName = ctx?.sides?.[sd]?.name || (sd === "home" ? "Хозяева" : "Гости");
+            const inNm = (item.inP && ctx?.names?.[item.inP]) || item.evg.players?.[0] || "легионер";
+            const outNm = (item.outP && ctx?.names?.[item.outP]) || item.evg.players?.[1] || "игрок";
+            if (opts?.strictLegionSub || (item.inP && criticalAfterIdx(item.gi, item.inP))) {
+              fatalProbs.push(`превышен лимит легионеров на поле у «${tName}» после замены на ${item.evg.min}' (${inNm} вместо ${outNm}): ${nextLeg}/${sideLim}`);
+            } else {
+              cancelledSubIndices.add(item.gi);
+              if (item.inP) droppedSubbedInPids.add(item.inP);
+            }
+          } else {
+            if (item.outP) { pitchBySide[sd].delete(item.outP); offPitchSoFar.add(item.outP); }
+            if (item.inP) { pitchBySide[sd].add(item.inP); subbedInSoFar.add(item.inP); }
+          }
+        }
+        // Skip ahead past processed group (other non-sub events in same minute still processed below; handled by groupIdxs skip on sub)
+        for (const gi of groupIdxs) {
+          if (gi !== idx) out[gi]._legionChecked = true;
+        }
+      }
+      for (const e of out) delete e._legionChecked;
+      if (cancelledSubIndices.size > 0) {
+        out = out.filter((ev, gi) => {
+          if (cancelledSubIndices.has(gi)) return false;
+          if (droppedSubbedInPids.size > 0 && Array.isArray(ev.pids) && ev.pids.some((pid: string) => droppedSubbedInPids.has(pid))) {
+            return false;
+          }
+          return true;
+        });
+      }
+    }
+  }
   // Discipline realism guard: deduplicate repeat reds on same actor and prevent multiple spurious straight reds in a single half
   if (minEv > 0) {
     const alreadyRedNames = new Set((st.reds || []).map((x) => norm(x)));
@@ -13021,20 +13323,37 @@ function fakePeriod(a, b, ctx, prev) {
   if (a === 1 || a === 46) push(a, 0, "none", "kickoff", [], a === 1 ? "Стартовый свисток! Мяч в игре — смотрим футбол." : "Свисток на второй тайм, команды снова в деле.");
   let hold = R() < 0.5 ? "home" : "away";
   for (let m = a; m <= b; m++) {
-    for (const sideKey of ["home", "away"]) {
-      const pSubs = ctx.lineup?.[sideKey]?.plannedSubs || [];
-      for (const ps of pSubs) {
-        if (ps.minute !== m) continue;
-        if (!onPitch[sideKey].has(ps.outPid) || subbedIn.has(ps.inPid)) continue;
+    for (const sideKey of ["home", "away"] as const) {
+      const pSubs = (ctx.lineup?.[sideKey]?.plannedSubs || []).filter((ps: any) => ps.minute === m);
+      if (!pSubs.length) continue;
+      const sideLimit = ctx?.legionLimitBySide?.[sideKey] ?? ctx?.legionLimit?.onPitch ?? (ctx?.compId === "rpl" && !ctx?.intraSquad ? getRplLegionLimit(S()).onPitch : null);
+      const isLegPid = (pid: string) => isCtxPidLegionnaire(ctx, pid);
+      const eligible = pSubs.filter((ps: any) => {
+        if (!onPitch[sideKey].has(ps.outPid) || subbedIn.has(ps.inPid)) return false;
         const myG = sideKey === "home" ? score[0] : score[1];
         const opG = sideKey === "home" ? score[1] : score[0];
         const cond = ps.condition || "always";
-        if (cond === "winning" && !(myG > opG)) continue;
-        if (cond === "losing" && !(myG < opG)) continue;
-        if (cond === "drawing" && !(myG === opG)) continue;
-        if (cond === "not_winning" && !(myG <= opG)) continue;
+        if (cond === "winning" && !(myG > opG)) return false;
+        if (cond === "losing" && !(myG < opG)) return false;
+        if (cond === "drawing" && !(myG === opG)) return false;
+        if (cond === "not_winning" && !(myG <= opG)) return false;
+        return true;
+      });
+      // Execute legionnaire-out swaps before legionnaire-in swaps at the same minute
+      eligible.sort((x: any, y: any) => {
+        const dx = (isLegPid(x.inPid) ? 1 : 0) - (isLegPid(x.outPid) ? 1 : 0);
+        const dy = (isLegPid(y.inPid) ? 1 : 0) - (isLegPid(y.outPid) ? 1 : 0);
+        return dx - dy;
+      });
+      for (const ps of eligible) {
+        if (!onPitch[sideKey].has(ps.outPid) || subbedIn.has(ps.inPid)) continue;
         const nextTimes = [...subTimes[sideKey], m * 60 + 2];
         if (subsCnt[sideKey] + 1 > SUB_MAX_PLAYERS || subWindows(nextTimes) > SUB_MAX_WINDOWS) continue;
+        if (sideLimit != null) {
+          const curLeg = [...onPitch[sideKey]].filter(isLegPid).length;
+          const nextLeg = curLeg - (isLegPid(ps.outPid) ? 1 : 0) + (isLegPid(ps.inPid) ? 1 : 0);
+          if (nextLeg > sideLimit) continue;
+        }
         subsCnt[sideKey]++;
         subTimes[sideKey].push(m * 60 + 2);
         onPitch[sideKey].delete(ps.outPid);
@@ -13210,7 +13529,7 @@ async function genPeriod(a, b, ctx, prev, note, depth = 0, onAtomicSuccess?: (se
           throw new Error("ответ ИИ оборвался до завершения отрезка");
         }
       }
-      const evs = normalizeEvents(rawEvents, a, b, ctx, prev);
+      const evs = normalizeEvents(rawEvents, a, b, ctx, prev, 3, { strictLegionSub: attempt + 1 < maxAttempts });
       const rawEnergy = b >= 90 ? (r?.state_at_end?.energy_spent || r?.state_at_end?.fatigue_report || r?.energy_spent || null) : null;
       const rawRefEval = b >= 90 ? (r?.state_at_end?.referee_eval || r?.referee_eval || null) : null;
       const out = { a, b, events: evs, note: r?.state_at_end?.momentum_note || note, fallback: false, energyReport: rawEnergy, refereeReport: rawRefEval };
@@ -13507,7 +13826,7 @@ async function genLight(ctx) {
       if (!ctx.prompt1) ctx.prompt1 = user;
       const r = await llmJSON(sys, user, { task: "match-light", temp: 0.9, max: 8e3 });
       const rawEvents = Array.isArray(r) ? r : r?.events || r?.match_events || [];
-      let events = normalizeEvents(rawEvents, 1, 90, ctx, [], 0);
+      let events = normalizeEvents(rawEvents, 1, 90, ctx, [], 0, { strictLegionSub: attempt === 0 });
       let stats = r?.stats || null;
       let note = String(r?.note || "");
       const [gotH, gotA] = rescore(events);
@@ -22895,11 +23214,12 @@ app.post("/api/club/lineup", needClub, (req, res) => {
     if (w) return fail(res, `${player(id)?.name}: \u0443\u0436\u0435 \u0437\u0430\u044F\u0432\u043B\u0435\u043D \u043D\u0430 \u043C\u0430\u0442\u0447 \u043A\u043E\u043C\u0430\u043D\u0434\u044B \xAB${w}\xBB \u0432 \u044D\u0442\u043E\u0442 \u0436\u0435 \u0434\u0435\u043D\u044C`);
     if (!isAvail(player(id), f.date, f.comp)) return fail(res, `${player(id)?.name} недоступен (${unavailText(player(id), f.date, f.comp) || "травма / дисквалификация"})`);
   }
-  if (f.comp === "rpl") {
-    const limit = getRplLegionLimit(S());
+  const matchLegLimit = getFixtureLegionLimit(f, req.tid);
+  if (matchLegLimit) {
     const legionStarters = st.map(player).filter(isLegionnaire);
-    if (legionStarters.length > limit.onPitch) {
-      return fail(res, `\u041F\u0440\u0435\u0432\u044B\u0448\u0435\u043D \u043B\u0438\u043C\u0438\u0442 \u043B\u0435\u0433\u0438\u043E\u043D\u0435\u0440\u043E\u0432 \u043D\u0430 \u043F\u043E\u043B\u0435 \u0432 \u0420\u041F\u041B: \u0432 \u0441\u0442\u0430\u0440\u0442\u043E\u0432\u043E\u043C \u0441\u043E\u0441\u0442\u0430\u0432\u0435 ${legionStarters.length} \u043B\u0435\u0433\u0438\u043E\u043D\u0435\u0440\u043E\u0432, \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u043E \u043C\u0430\u043A\u0441\u0438\u043C\u0443\u043C ${limit.onPitch} (\u043B\u0438\u043C\u0438\u0442 ${limit.label} \u043D\u0430 \u0441\u0435\u0437\u043E\u043D ${S()})`);
+    if (legionStarters.length > matchLegLimit.onPitch) {
+      const compLabel = f.comp === "cup" ? "Кубке России" : f.comp === "supercup" ? "Суперкубке" : "РПЛ";
+      return fail(res, `Превышен лимит легионеров на поле в ${compLabel}: в стартовом составе ${legionStarters.length} легионеров, разрешено максимум ${matchLegLimit.onPitch} (лимит ${matchLegLimit.label} на сезон ${f.season || S()})`);
     }
   }
   const fm = /^\d(-\d){1,3}$/.test(req.body.formation || "") ? req.body.formation : "4-3-3";
@@ -22908,6 +23228,12 @@ app.post("/api/club/lineup", needClub, (req, res) => {
   const orderedSt = slotRes.entries.length === st.length ? slotRes.entries.map((e) => e.pid) : st;
   const roles = normalizeRoles(req.body.roles, sq);
   const plannedSubs = normalizePlannedSubs(req.body.plannedSubs, orderedSt, bench);
+  if (matchLegLimit) {
+    const subCheck = evaluatePlannedSubsLegionLimit(plannedSubs, orderedSt, matchLegLimit.onPitch, false);
+    if (!subCheck.ok && subCheck.error) {
+      return fail(res, subCheck.error);
+    }
+  }
   const L = {
     formation: fm,
     starters: orderedSt,
