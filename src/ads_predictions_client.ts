@@ -851,7 +851,7 @@ function ensureExtStyles() {
       .sp-cards-grid{ grid-template-columns:1fr; }
     }
     @media (max-width:640px){
-      .pred-coupon-dock{ right:10px; left:10px; bottom:10px; width:auto; }
+      .pred-coupon-dock{ right:10px; left:10px; bottom:calc(10px + env(safe-area-inset-bottom)); width:auto; }
     }
     @media (max-width:560px){
       .pred-hero{ padding:14px 15px; }
@@ -859,6 +859,11 @@ function ensureExtStyles() {
       .pred-quick-split{ grid-template-columns:1fr; gap:8px; }
       .pred-es-grid{ grid-template-columns:repeat(2,minmax(0,1fr)); }
       .pred-line-4{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .pred-search-input{ min-width:0; max-width:100%; width:100%; }
+      .pred-comp-pills{ width:100%; flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:2px; scrollbar-width:none; }
+      .pred-comp-pills::-webkit-scrollbar{ display:none; }
+      .pred-comp-pill{ flex-shrink:0; min-height:38px; }
+      .pred-odd-btn{ padding:7px 7px; font-size:12.5px; }
     }
     .rpl-adsgram-task{
       --adsgram-task-font-size:15px;
@@ -2208,7 +2213,7 @@ function renderPredictionsContent(app: HTMLElement, data: any) {
           <div class="small muted">${e(subtitle)}</div>
         </div>
         <div class="wrap">
-          <table>
+          <table class="idx-table">
             <thead>
               <tr>
                 <th>#</th>

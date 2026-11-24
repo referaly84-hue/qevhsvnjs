@@ -474,6 +474,9 @@ img,svg,video{max-width:100%}
   .wrap table{min-width:100% !important;width:max-content !important}
   th,td{padding:8px 7px !important;font-size:13px !important}
   .wrap table th:first-child,.wrap table td:first-child{width:160px !important;min-width:160px !important;max-width:160px !important;padding-left:8px !important;white-space:normal !important}
+  .wrap table.idx-table th:first-child,.wrap table.idx-table td:first-child,
+  .wrap table.nt-table th:first-child,.wrap table.nt-table td:first-child{position:static !important;box-shadow:none !important;width:36px !important;min-width:36px !important;max-width:36px !important;padding:7px 4px !important;text-align:center !important}
+  .wrap table.nt-table td.nt-reason,.wrap table.nt-table th.nt-reason{white-space:normal !important;min-width:190px !important;max-width:250px !important;line-height:1.35 !important}
   .wrap table td:first-child .t-cell{display:flex;align-items:center;gap:6px;max-width:100%;min-width:0}
   .wrap table td:first-child .t-cell .pos{width:16px;flex:0 0 16px;font-size:12px}
   .wrap table td:first-child .t-cell .t-logo{width:18px;height:18px;flex:0 0 18px}
@@ -492,10 +495,15 @@ img,svg,video{max-width:100%}
   .fx .sc{font-size:14px;padding:4px 2px}
   /* табло матча */
   .score .line{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:6px}
-  .score .tm-box,.score .tm-box.r{flex-direction:column;justify-content:center;text-align:center;gap:6px;min-width:0}
+  .score .tm-box{flex-direction:column;justify-content:center;text-align:center;gap:6px;min-width:0}
+  .score .tm-box.r{flex-direction:column-reverse;justify-content:center;text-align:center;gap:6px;min-width:0}
   .score .tm{font-size:12.5px;line-height:1.2;overflow-wrap:anywhere}
   .score .num{font-size:26px;padding:3px 9px;min-width:0}
   .score .t-logo.lg{width:40px;height:40px}
+  .motm-hero{padding:14px 12px}
+  .motm-rating{font-size:20px;padding:4px 10px;flex-shrink:0}
+  .interview-card{padding:13px 12px}
+  .interview-quote{padding:9px 11px;font-size:14px;overflow-wrap:anywhere}
   .ev{grid-template-columns:46px 22px minmax(0,1fr);gap:6px;padding:9px 4px;font-size:14px;overflow-wrap:anywhere}
   .ev.key,.ev.goal,.ev.red{padding-left:6px}
   .bar2{grid-template-columns:40px minmax(0,1fr) 40px;gap:8px}
@@ -505,6 +513,8 @@ img,svg,video{max-width:100%}
   .cal-container{overflow-x:visible}
   .cal-grid,.cal-weekday{min-width:0 !important;gap:3px}
   .cal-nav-bar{padding:8px 10px}
+  .cal-nav-bar>div{width:100%;justify-content:space-between}
+  .cal-nav-bar select{flex:1;min-width:0;max-width:100%}
   .cal-cell{min-height:58px !important;padding:3px !important;border-radius:6px;gap:2px}
   .cal-day-num{font-size:12px}
   .cal-chip{font-size:0 !important;height:5px;min-height:5px;padding:0 !important;border-radius:3px;gap:0;border-width:0}
@@ -512,6 +522,7 @@ img,svg,video{max-width:100%}
   .cal-tourn-pill,.cal-period-badge{font-size:0 !important;padding:0 !important;width:7px;height:7px;min-height:7px;border-radius:50%;gap:0}
   .cal-tourn-pill *,.cal-period-badge *{display:none}
   .cal-more{font-size:9px}
+  .table-legend{gap:8px 10px;padding:10px;font-size:12px}
   .staff-grid{grid-template-columns:minmax(0,1fr)}
   .awards-grid{grid-template-columns:minmax(0,1fr)}
   .pitch-player{min-width:0;flex:1 1 0}
@@ -848,7 +859,7 @@ img,svg,video{max-width:100%}
 .m-pitch-bench-item.sel{border-color:#d97706;background:#fffbeb}
 @media(max-width:680px){
   .m-pitch-board{padding:12px 4px}
-  .m-pitch-node{width:64px}
+  .m-pitch-node{flex:1 1 0;min-width:0;width:auto;max-width:20%}
   .m-pitch-circle{width:34px;height:34px;font-size:10.5px}
   .m-pitch-avatar{width:36px;height:36px}
   .m-pitch-rating{font-size:9.5px;padding:1px 4px;right:-8px}
@@ -4371,8 +4382,8 @@ async function pgFixtures(app, comp = 'rpl', round) {
         ${dayList.length ? dayList.map(f => {
           if (f.isNational) {
             const isU21Match = !!f.isNationalU21;
-            return `<div class="row sp" style="padding:10px 12px;background:var(--soft);border-radius:8px;margin-bottom:8px">
-              <div style="display:flex;align-items:center;gap:8px"><img src="/assets/aistudio/russia_russia-national-team.football-logos.cc_2a5e3ddc.svg" alt="" style="width:18px;height:18px;object-fit:contain"/><span class="tag live" style="background:${isU21Match ? '#4f46e5' : '#b91c1c'}">${isU21Match ? 'Сборная России U21' : 'Сборная России'}</span> <b>${e(f.homeName)} — ${e(f.awayName)}</b> · ${e(f.time)}</div>
+            return `<div class="row sp" style="padding:10px 12px;background:var(--soft);border-radius:8px;margin-bottom:8px;gap:8px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;flex:1"><img src="/assets/aistudio/russia_russia-national-team.football-logos.cc_2a5e3ddc.svg" alt="" style="width:18px;height:18px;object-fit:contain;flex-shrink:0"/><span class="tag live" style="background:${isU21Match ? '#4f46e5' : '#b91c1c'}">${isU21Match ? 'Сборная России U21' : 'Сборная России'}</span> <b>${e(f.homeName)} — ${e(f.awayName)}</b> · ${e(f.time)}</div>
               <a class="btn alt sm" href="${isU21Match ? '#/national/u21' : '#/national'}">${isU21Match ? 'В раздел U21' : 'В раздел Сборная'}</a>
             </div>`;
           }
@@ -4847,7 +4858,7 @@ ${motm && motmPlayer ? `
   }
 
   $('#mt').onclick = ev => {
-    const k = ev.target.dataset.k;
+    const k = ev.target?.closest?.('button[data-k]')?.dataset?.k;
     if (k) {
       mtab = k;
       document.querySelectorAll('#mt button').forEach(b => b.classList.toggle('on', b.dataset.k === k));
@@ -6033,7 +6044,7 @@ async function pgLeaders(app) {
     <div class="tabs"><button data-v="p" class="${LD.view === 'p' ? 'on' : ''}">Игроки</button><button data-v="t" class="${LD.view === 't' ? 'on' : ''}">Команды</button></div>
     ${LD.view === 'p' ? `<div class="row" style="margin-bottom:12px;gap:6px;flex-wrap:wrap">${PM.map(([k, t]) => `<button class="btn sm ${k === LD.metric ? '' : 'alt'}" data-m="${k}">${t}</button>`).join('')}</div>
       ${pc.length && sortedPlayers.length ? '<div class="scroll-hint"><span>👉 Прокручивайте таблицу вправо</span></div>' : ''}
-      <div class="panel wrap">${pc.length ? (sortedPlayers.length ? `<table><thead><tr><th>#</th><th class="l">Игрок</th><th class="l">Команда</th><th>Матчи</th><th>${metricLabel}</th></tr></thead><tbody>${sortedPlayers.slice(0, 50).map((x, i) => `<tr><td class="pos">${i + 1}</td><td class="l">${e(x.n)}</td><td class="l muted"><div class="t-cell">${x.teamLogo ? `<img class="t-logo" src="${x.teamLogo}" alt=""/>` : ''}<span>${e(x.team)}</span></div></td><td>${x.m}</td><td><b>${fmtLeaderVal(x)}</b></td></tr>`).join('')}</tbody></table>` : `<div class="empty">${emptyMetricMsg}</div>`) : '<div class="empty">Статистика появится после первых полностью сыгранных матчей (запустите тур в разделе «Расписание»).</div>'}</div>`
+      <div class="panel wrap">${pc.length ? (sortedPlayers.length ? `<table class="idx-table"><thead><tr><th>#</th><th class="l">Игрок</th><th class="l">Команда</th><th>Матчи</th><th>${metricLabel}</th></tr></thead><tbody>${sortedPlayers.slice(0, 50).map((x, i) => `<tr><td class="pos">${i + 1}</td><td class="l">${e(x.n)}</td><td class="l muted"><div class="t-cell">${x.teamLogo ? `<img class="t-logo" src="${x.teamLogo}" alt=""/>` : ''}<span>${e(x.team)}</span></div></td><td>${x.m}</td><td><b>${fmtLeaderVal(x)}</b></td></tr>`).join('')}</tbody></table>` : `<div class="empty">${emptyMetricMsg}</div>`) : '<div class="empty">Статистика появится после первых полностью сыгранных матчей (запустите тур в разделе «Расписание»).</div>'}</div>`
     : `${teamsList.length ? '<div class="scroll-hint"><span>👉 Прокручивайте таблицу вправо (18 показателей)</span></div>' : ''}
       <div class="panel wrap">${teamsList.length ? `<table><thead><tr><th class="l">Команда</th>${TC.map(([k, t]) => `<th class="s" data-s="${k}">${t}${LD.sort === k ? ' ▾' : ''}</th>`).join('')}</tr></thead><tbody>${[...teamsList].map(x => ({ ...x })).sort((a, b) => (b[LD.sort] || 0) - (a[LD.sort] || 0)).map(x => `<tr><td class="l"><div class="t-cell team-clickable" data-open-team-stats="${x.tid}" title="Посмотреть статистику команды и игроков">${x.teamLogo ? `<img class="t-logo" src="${x.teamLogo}" alt=""/>` : ''}<span>${e(x.team)}</span></div></td>${TC.map(([k]) => `<td>${k === 'xg' || k === 'xga' ? (+x[k]).toFixed(2) : (x[k] || 0)}</td>`).join('')}</tr>`).join('')}</tbody></table><p class="small muted" style="margin-top:8px">Суд+ — ошибки арбитра в пользу команды, Суд− — против. Пен+ / Пен− — пенальти в пользу / против. ПР — пропущенные мячи.</p>` : '<div class="empty">Статистика команд появится после первых сыгранных матчей.</div>'}</div>`}`;
   } else if (LD.tab === 'round') {
@@ -10813,7 +10824,7 @@ async function pgClub(app) {
                     ${w.games} игр · ср. оценка <b>${w.avgRating}</b>${w.pos === 'ВР' ? (w.cleanSheets ? ` · ${w.cleanSheets} на ноль` : '') : ((w.goals || w.assists) ? ` · ${w.goals}Г + ${w.assists}П` : '')}
                   </div>
                   ${clubs.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
-                    ${clubs.map(cl => `<span class="tag" style="background:#fff;border-color:#cbd5e1;font-size:11.5px;padding:3px 8px">
+                    ${clubs.map(cl => `<span class="tag" style="background:#fff;border-color:#cbd5e1;font-size:11.5px;padding:3px 8px;white-space:normal;max-width:100%;line-height:1.3">
                       ${cl.flag || '🌍'} <b>${e(cl.name)}</b>${cl.league ? ` <span class="muted">(${e(cl.league)})</span>` : ''} · ${cl.heat ?? w.heat}%${cl.focus === 'bench_depth' ? ' · 🔄 Аренда / скамейка' : ''}
                     </span>`).join('')}
                   </div>` : ''}
@@ -13920,7 +13931,7 @@ async function pgAdmin(app) {
       <p class="muted small">Негласный турнир: в таблицы идут только очные матчи РПЛ между клубами одной группы. Отдельные матчи играть не нужно — результаты берутся из обычного календаря РПЛ. Очки: победа 3, ничья 1.</p></div>` +
       it.groups.map(g => `<div class="panel"><h3>Группа «${e(g.name)}» <span class="muted small">· сыграно ${g.played} из ${g.total}</span></h3>
         ${g.missing.length ? `<div class="warn" style="margin-bottom:8px">Нет в базе РПЛ: ${g.missing.map(e).join(', ')}</div>` : ''}
-        <div style="overflow-x:auto"><table><thead><tr><th>#</th><th class="l">Клуб</th><th>И</th><th>В</th><th>Н</th><th>П</th><th>Мячи</th><th>Р</th><th>О</th><th>Форма</th></tr></thead><tbody>
+        <div class="wrap"><table class="idx-table"><thead><tr><th>#</th><th class="l">Клуб</th><th>И</th><th>В</th><th>Н</th><th>П</th><th>Мячи</th><th>Р</th><th>О</th><th>Форма</th></tr></thead><tbody>
         ${g.rows.map(r => `<tr><td>${r.pos}</td><td class="l"><div class="t-cell">${logo(r.logo)} ${e(r.name)}</div></td><td>${r.p}</td><td>${r.w}</td><td>${r.d}</td><td>${r.l}</td><td>${r.gf}–${r.ga}</td><td>${r.gd > 0 ? '+' : ''}${r.gd}</td><td><b>${r.pts}</b></td><td>${e(r.form)}</td></tr>`).join('')}
         </tbody></table></div>
         <details style="margin-top:10px"><summary class="small" style="cursor:pointer">Матчи группы (${g.games.length})</summary>
@@ -17592,8 +17603,8 @@ async function pgNational(app, subTeam) {
     if (!list.length) {
       return `<div class="empty">${activeStage === 'final' ? 'Итоговый список (кого вызвали) ещё не сформирован.' : 'Расширенный состав на ближайшую паузу ещё не опубликован.'}</div>`;
     }
-    return `<div class="scroll-hint"><span>👉 Прокручивайте состав вправо</span></div><div class="wrap"><table>
-      <thead><tr><th>№</th><th class="l">Игрок</th><th>Поз.</th><th>Возр.</th><th class="l">Клуб</th>${showReasons ? '<th class="l">Почему вызван</th>' : ''}<th>Матчи</th><th>Голы</th><th>Пасы</th>${canEdit ? '<th></th>' : ''}</tr></thead>
+    return `<div class="scroll-hint"><span>👉 Прокручивайте состав вправо</span></div><div class="wrap"><table class="nt-table">
+      <thead><tr><th>№</th><th class="l">Игрок</th><th>Поз.</th><th>Возр.</th><th class="l">Клуб</th>${showReasons ? '<th class="l nt-reason">Почему вызван</th>' : ''}<th>Матчи</th><th>Голы</th><th>Пасы</th>${canEdit ? '<th></th>' : ''}</tr></thead>
       <tbody>
         ${list.map((p, i) => `<tr>
           <td><b>${p.number || p.num || (i + 1)}</b></td>
@@ -17601,7 +17612,7 @@ async function pgNational(app, subTeam) {
           <td><span class="tag">${e(p.pos)}</span></td>
           <td class="small muted">${p.age != null ? `${p.age} л.` : '—'}</td>
           <td class="l"><div class="t-cell">${p.teamLogo ? `<img class="t-logo" src="${p.teamLogo}" alt=""/>` : ''}<span>${e(p.teamName)}${p.isAbroad && p.abroadCountry && !String(p.teamName || '').includes(p.abroadCountry) ? ` <span class="muted small">(${e(p.abroadCountry)})</span>` : ''}</span></div></td>
-          ${showReasons ? `<td class="l small" style="max-width:280px;color:#334155;line-height:1.35">${e(p.callupReason || '—')}</td>` : ''}
+          ${showReasons ? `<td class="l small nt-reason" style="max-width:280px;color:#334155;line-height:1.35">${e(p.callupReason || '—')}</td>` : ''}
           <td>${p.matches || 0}</td>
           <td>${p.goals || 0}</td>
           <td>${p.assists || 0}</td>
