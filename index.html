@@ -3740,25 +3740,15 @@ async function pgHome(app) {
     if (aFuture) return ta - tb || String((a.date || '') + (a.time || '')).localeCompare(String((b.date || '') + (b.time || '')));
     return tb - ta || String((a.date || '') + (a.time || '')).localeCompare(String((b.date || '') + (b.time || '')));
   };
-  const upcomingAll = fx
+  const next = fx
     .filter(f => f.status === 'scheduled' || f.status === 'queued' || f.status === 'generating')
-    .sort(sortUpcoming);
-  const next = upcomingAll.slice(0, 5);
-  const ensureFeaturedUpcoming = (matchFn) => {
-    const cand = upcomingAll.find(matchFn);
-    if (cand && !next.some(x => x.id === cand.id)) {
-      if (next.length >= 5) next.pop();
-      next.push(cand);
-    }
-  };
-  ensureFeaturedUpcoming(f => f.comp === 'friendly_match');
-  ensureFeaturedUpcoming(f => f.isNational || f.comp === 'national' || f.comp === 'national_u21');
-  next.sort(sortUpcoming);
+    .sort(sortUpcoming)
+    .slice(0, 3);
 
   const last = fx
     .filter(f => f.status === 'done')
     .sort((a, b) => fxRealTs(b) - fxRealTs(a) || String((b.date || '') + (b.time || '')).localeCompare(String((a.date || '') + (a.time || ''))))
-    .slice(0, 4);
+    .slice(0, 3);
 
   app.innerHTML = `<h1>Сезон ${e(S.st?.season || '2026/27')}</h1>
 
