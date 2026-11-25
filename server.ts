@@ -5345,25 +5345,25 @@ async function createForeignOfferWithAI(options: { player: any; club: any; db2?:
   let wage = `€${Math.round(clamp(feeAmount * 7.5 + (ovr - 65) * 1.3, 8, 140))} тыс./нед.`;
   const seasonStr = formatSeasonSummaryText(player2, st);
   let triggerReason = options.triggerReason || (isBench
-    ? `Поиск усиления со скамейки и игровой практики (${seasonStr || `OVR ${ovr}`})`
-    : (seasonStr ? `Игровая форма по сезону: ${seasonStr}` : options.performanceReason)) || `Уверенная игра и потенциал (${ovr}) в составе «${club?.name || "клуба"}»`;
+    ? `Поиск усиления со скамейки и игровой практики (${seasonStr || player2?.pos || "обойма"})`
+    : (seasonStr ? `Игровая форма по сезону: ${seasonStr}` : options.performanceReason)) || `Уверенная игра и потенциал в составе «${club?.name || "клуба"}»`;
   let scoutReport = options.performanceReason || (isBench
-    ? `Скауты клуба «${buyer.name}» обратили внимание на резервиста ${player2?.name || "игрока"} (${player2?.pos || "ЦП"}, OVR ${ovr}): футболист сидит на скамейке в «${club?.name || "клубе"}» и готов усилить состав (${offerType === "loan" ? "предложена аренда" : "бюджетный выкуп"}).`
+    ? `Скауты клуба «${buyer.name}» обратили внимание на резервиста ${player2?.name || "игрока"} (${player2?.pos || "ЦП"}): футболист сидит на скамейке в «${club?.name || "клубе"}» и готов усилить состав (${offerType === "loan" ? "предложена аренда" : "бюджетный выкуп"}).`
     : (seasonStr
       ? `Скауты клуба «${buyer.name}» вели ${player2?.name || "игрока"} на протяжении сезона (${seasonStr}) и считают его готовым усилением состава.`
-      : `Международные скауты клуба «${buyer.name}» оценили игру ${player2?.name || "футболиста"} (${player2?.pos || "ЦП"}, рейтинг ${ovr}) и видят в нём усиление состава.`));
+      : `Международные скауты клуба «${buyer.name}» оценили игру ${player2?.name || "футболиста"} (${player2?.pos || "ЦП"}) и видят в нём усиление состава.`));
 
   if (typeof hasLLM === "function" && hasLLM() && typeof llmJSON === "function") {
     try {
       const allowedList = (eligiblePool.length ? eligiblePool : [buyer]).slice(0, 14);
-      const clubList = allowedList.map((c) => `${c.name} (${c.country}, ${c.league}, рейтинг ${c.reputation})`).join("; ");
+      const clubList = allowedList.map((c) => `${c.name} (${c.country}, ${c.league})`).join("; ");
       const tablePlaceStr = clubCtx
         ? `${clubCtx.rank}-е место из ${clubCtx.total} в лиге ${String(clubCtx.comp || "rpl").toUpperCase()}`
         : "";
       const sys = "Ты — международный футбольный скаут. Сгенерируй реалистичное зарубежное предложение (полноценный трансфер или аренду) строго из переданного списка допустимых клубов-покупателей. ЗАПРЕЩЕНО придумывать Барселону, Реал и любые клубы не из списка. Отвечай строго в JSON.";
-      const prompt = `Игрок: ${player2?.name || "Игрок"}, позиция: ${player2?.pos || "ЦП"}, возраст: ${age}, OVR: ${ovr}, клуб: «${club?.name || "Клуб"}»${tablePlaceStr ? ` (${tablePlaceStr})` : ""}.
+      const prompt = `Игрок: ${player2?.name || "Игрок"}, позиция: ${player2?.pos || "ЦП"}, возраст: ${age}, стиль: ${player2?.style || "сбалансированный"}, клуб: «${club?.name || "Клуб"}»${tablePlaceStr ? ` (${tablePlaceStr})` : ""}.
 Статус в клубе: ${isBench ? "игрок скамейки / ротации (мало игровой практики)" : "игрок обоймы"}.
-Сезонная статистика и форма: ${seasonStr || "данные за карьеру/рейтинг"}.
+Сезонная статистика и форма: ${seasonStr || player2?.form || "игровая практика по профилю"}.
 Повод интереса: ${triggerReason}.
 Рекомендуемый формат: ${offerType === "loan" ? "аренда (loan)" : "выкуп (transfer)"}, базовый расчёт цены: €${feeAmount}M.
 Клуб-наблюдатель: ${buyer.name}. Допустимые клубы (выбирай ТОЛЬКО из них): ${clubList}.
@@ -6381,7 +6381,7 @@ try {
   SYS_DEFAULT = fs3.readFileSync(path3.join(__dirname, "prompt.txt"), "utf8");
 } catch {
   SYS_DEFAULT = `Ты — профессиональный российский футбольный комментатор и реалистичный симулятор матчей (Вирт РПЛ, Кубок России, Суперкубок, ФНЛ, товарищеские и стыковые матчи).
-Симулируй указанный отрезок матча максимально живо, тактически достоверно и строго учитывай все входные данные: силу и профиль игроков, тактику и профиль главного тренера, судейскую манеру и VAR, погоду, усталость и календарь. Используй ТОЛЬКО игроков из переданных составов.
+Симулируй указанный отрезок матча максимально живо, тактически достоверно и строго учитывай все входные данные: футбольный профиль каждого игрока (стиль игры, опыт и реальный клуб, статистику 2 сезонов, форму, характер, усталость и позицию на поле — БЕЗ каких-либо числовых рейтингов), тактику и профиль главного тренера, судейскую манеру и VAR, погоду и календарь. Используй ТОЛЬКО игроков из переданных составов.
 
 ═══ РАЗДЕЛ 0: ПРЕМАТЧ И ПОСТМАТЧ ═══
 • Прематч создавай ТОЛЬКО в первом отрезке матча (когда отрезок начинается с минуты 1). У каждого события прематча ОБЯЗАТЕЛЬНО указывай отрицательную минуту min от -15 до -1 (по порядку времени до стартового свистка).
@@ -9444,8 +9444,8 @@ async function getTransferAiAdvice(t, p, fromT, toT) {
   const isExchange = t.type === "exchange" || !!t.exchangePid;
   const swapP = isExchange && t.exchangePid ? player(t.exchangePid) : null;
   const typeStr = isExchange ? `\u041E\u0431\u043C\u0435\u043D \u0438\u0433\u0440\u043E\u043A\u0430\u043C\u0438 (\u0432\u0437\u0430\u043C\u0435\u043D \u043F\u0440\u0435\u0434\u043B\u0430\u0433\u0430\u0435\u0442\u0441\u044F ${swapP?.name || t.exchangePlayerName || "\u0438\u0433\u0440\u043E\u043A"}${t.fee ? `, \u0434\u043E\u043F\u043B\u0430\u0442\u0430: ${t.fee}` : ""})` : t.type === "loan" ? "\u0410\u0440\u0435\u043D\u0434\u0430" : "\u041F\u043E\u043B\u043D\u043E\u0446\u0435\u043D\u043D\u044B\u0439 \u0442\u0440\u0430\u043D\u0441\u0444\u0435\u0440";
-  const stats = p ? `\u041C\u0430\u0442\u0447\u0435\u0439: ${p.matches || 0}, \u0433\u043E\u043B\u043E\u0432: ${p.goals || 0}, \u0430\u0441\u0441\u0438\u0441\u0442\u043E\u0432: ${p.assists || 0}, \u0441\u0440. \u043E\u0446\u0435\u043D\u043A\u0430: ${Number(p.rating || 7).toFixed(2)}, OVR: ${p.ovr || 75}` : "\u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0430 \u0444\u043E\u0440\u043C\u0438\u0440\u0443\u0435\u0442\u0441\u044F";
-  const swapStats = swapP ? `\u0418\u0433\u0440\u043E\u043A \u043D\u0430 \u043E\u0431\u043C\u0435\u043D: ${swapP.name} (${swapP.pos}, ${ageOfPlayer(swapP) ?? 24} \u043B\u0435\u0442, OVR: ${swapP.ovr || 74}, \u0438\u0433\u0440: ${swapP.matches || 0}, \u0433\u043E\u043B\u043E\u0432: ${swapP.goals || 0})` : "";
+  const stats = p ? `\u041C\u0430\u0442\u0447\u0435\u0439: ${p.matches || 0}, \u0433\u043E\u043B\u043E\u0432: ${p.goals || 0}, \u0430\u0441\u0441\u0438\u0441\u0442\u043E\u0432: ${p.assists || 0}, \u0441\u0442\u0438\u043B\u044C: ${p.style || "\u0441\u0431\u0430\u043B\u0430\u043D\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439"}` : "\u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0430 \u0444\u043E\u0440\u043C\u0438\u0440\u0443\u0435\u0442\u0441\u044F";
+  const swapStats = swapP ? `\u0418\u0433\u0440\u043E\u043A \u043D\u0430 \u043E\u0431\u043C\u0435\u043D: ${swapP.name} (${swapP.pos}, ${ageOfPlayer(swapP) ?? 24} \u043B\u0435\u0442, \u0441\u0442\u0438\u043B\u044C: ${swapP.style || "\u0441\u0431\u0430\u043B\u0430\u043D\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439"}, \u0438\u0433\u0440: ${swapP.matches || 0}, \u0433\u043E\u043B\u043E\u0432: ${swapP.goals || 0})` : "";
   const competing = (db.transfers || []).filter((x) => x.pid === t.pid && x.id !== t.id && x.status === "pending");
   const competingText = competing.length ? `\u041A\u043E\u043D\u043A\u0443\u0440\u0438\u0440\u0443\u044E\u0449\u0438\u0435 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u043F\u043E \u044D\u0442\u043E\u043C\u0443 \u0436\u0435 \u0438\u0433\u0440\u043E\u043A\u0443:
 ` + competing.map((c, i) => `  - \u041A\u043B\u0443\u0431 \xAB${c.toName || team(c.to)?.name}\xBB: ${c.fee} (${c.type === "exchange" ? "\u043E\u0431\u043C\u0435\u043D" : c.type === "loan" ? "\u0430\u0440\u0435\u043D\u0434\u0430" : "\u0432\u044B\u043A\u0443\u043F"})`).join("\n") : "\u0414\u0440\u0443\u0433\u0438\u0445 \u043F\u0440\u0435\u0434\u043B\u043E\u0436\u0435\u043D\u0438\u0439 \u043F\u043E \u0438\u0433\u0440\u043E\u043A\u0443 \u043D\u0435\u0442.";
@@ -11940,9 +11940,8 @@ function cardLine(p, date, opts?: { slotInfo?: any; fatigueInfo?: any; roleNames
   }
   const fatTag = opts?.fatigueInfo?.label ? ` Физическая готовность: ${opts.fatigueInfo.label}.` : "";
   const rolesTag = opts?.roleNames?.length ? ` Штатные роли: ${opts.roleNames.join(", ")}.` : "";
-  const ratingTag = Number.isFinite(+p.rating) ? `, рейтинг ${Math.round(+p.rating)}` : "";
   const legTag = opts?.showLegionTag ? (isLegionnaire(p) ? " [ЛЕГИОНЕР]" : " [РФ/ЕАЭС — не легионер]") : "";
-  return `${playerPosLabel(p)} ${p.name}${legTag}${slotTag}${a ? `, ${a} лет` : ""}${ratingTag}${nat}${foot}${real} — стиль: ${p.style || "сбалансированный"}. Достижения: ${(p.achievements || []).join("; ") || "опыт выступлений"}. Статистика 2 сезонов: ${p.stats2y || "регулярная игровая практика"}. Форма: ${p.form || "стабильная"}.${seas}${fatTag}${rolesTag} Характер: ${p.character || "хладнокровный, командный игрок"}. Новости: ${p.news || "готовится к матчу в штатном режиме"}.`;
+  return `${playerPosLabel(p)} ${p.name}${legTag}${slotTag}${a ? `, ${a} лет` : ""}${nat}${foot}${real} — стиль: ${p.style || "сбалансированный"}. Достижения: ${(p.achievements || []).join("; ") || "опыт выступлений"}. Статистика 2 сезонов: ${p.stats2y || "регулярная игровая практика"}. Форма: ${p.form || "стабильная"}.${seas}${fatTag}${rolesTag} Характер: ${p.character || "хладнокровный, командный игрок"}. Новости: ${p.news || "готовится к матчу в штатном режиме"}.`;
 }
 async function buildCtx(f) {
   const intra = isIntraSquad(f);
@@ -12476,7 +12475,6 @@ ${lineText(ctx, "away")}
     if (lp) {
       u += `
 9. БАЛАНС СИЛ И ОБЯЗАТЕЛЬНЫЙ ИТОГОВЫЙ СЦЕНАРИЙ МАТЧА (РЕЖИМ СВОДКИ):
-- Сила стартовых составов: ${H} — рейтинг ${lp.powH} (атака ${lp.attH}, оборона ${lp.defH}), ${A} — рейтинг ${lp.powA} (атака ${lp.attA}, оборона ${lp.defA}).
 - Фактор поля и ожидаемая динамика: ${lp.favoriteNote}.
 - ОБЯЗАТЕЛЬНЫЙ ЦЕЛЕВОЙ СЧЁТ МАТЧА: ${H} ${lp.targetH}:${lp.targetA} ${A} (${lp.scenarioHint}).
 - СТРОГОЕ ПРАВИЛО ПО ГОЛАМ: в массиве events должно быть РОВНО ${lp.targetH} событий type="goal" или "own_goal" с team="home" (в пользу «${H}») и РОВНО ${lp.targetA} событий type="goal" или "own_goal" с team="away" (в пользу «${A}»).${lp.targetH === 0 && lp.targetA === 0 ? " В этом матче голов нет (0:0): не создавай событий goal/own_goal, покажи карточки, замены, травмы/офсайды и событие fulltime." : ""} НЕ меняй целевой счёт и НЕ своди игру к шаблонному 1:1!
@@ -13560,7 +13558,7 @@ async function genPeriod(a, b, ctx, prev, note, depth = 0, onAtomicSuccess?: (se
 var LIGHT_SYS_ADD = `
 
 ═══ РЕЖИМ СВОДКИ МАТЧА (ПЕРЕОПРЕДЕЛЯЕТ РАЗДЕЛ 2 ПРОМТА ПРО SHOT->GOAL И РАЗДЕЛ 11) ═══
-Это матч нижней лиги или медиалиги: поминутная хроника, прематч (раздел 0) и послематчевые реплики не нужны. Учитывай ВСЕ входные данные (силу и рейтинги игроков, форму, место в таблице, тренеров, схемы, погоду, газон, мотивацию, целевой сценарий матча), но верни только итог одним JSON: {"events":[...],"stats":{...},"energy_spent":{...},"referee_eval":{"rating":число_5_0_9_5,"summary":"..."},"note":"..."}.
+Это матч нижней лиги или медиалиги: поминутная хроника, прематч (раздел 0) и послематчевые реплики не нужны. Учитывай ВСЕ входные данные (профили, стиль и форму игроков, место в таблице, тренеров, схемы, погоду, газон, мотивацию, целевой сценарий матча), но верни только итог одним JSON: {"events":[...],"stats":{...},"energy_spent":{...},"referee_eval":{"rating":число_5_0_9_5,"summary":"..."},"note":"..."}.
 events — только значимые события всего матча (минуты 1–90): все голы и автоголы (players: [автор, ассистент, если есть]), пенальти, жёлтые и красные карточки, травмы, замены, ошибки судьи/VAR, событие fulltime на 90-й минуте. Не более 30 событий, text — одна короткая строка. Поля min/sec/team/type/players/text — как в разделе 11. Никаких pass/dribble/shot/save/possession — голы указываются сразу событием "goal" или "own_goal" БЕЗ отдельного "shot".
 ОБЯЗАТЕЛЬНО: строго соблюдай заданный во входных данных целевой счёт и количество голов каждой команды (НИ В КОЕМ СЛУЧАЕ не своди матчи к 1:1, если целевой счёт иной!).
 stats — {"home":{"shots":int,"shots_on_target":int,"xg":число,"corners":int,"fouls":int,"offsides":int,"tackles":int,"possession":int},"away":{...}}. Цифры согласованы с событиями: удары в створ не меньше голов, удары не меньше ударов в створ, фолов не меньше карточек, владение двух команд в сумме 100.
@@ -27748,36 +27746,34 @@ function buildNationalCallupReasonFallback(p: any, teamType: "main" | "u21" = "m
   if (!p) return "Выбор тренерского штаба по текущей форме.";
   const isAbroad = isRussianAbroadPlayer(p);
   const clubLbl = nationalPlayerClubLabel(p);
-  const ovr = Number(p.ovr || 70);
-  const rating = Number(p.rating || 0);
   const goals = Number(p.goals || 0);
   const assists = Number(p.assists || 0);
   const matches = Number(p.matches || 0);
   const pos = String(p.pos || "ЦП");
   if (isAbroad) {
-    return `Легионер в «${clubLbl}»: высокая ценность за зарубежный опыт (OVR ${ovr}).`;
+    return `Легионер в «${clubLbl}»: высокая ценность за зарубежный опыт.`;
   }
   if (pos === "ВР") {
-    return matches > 0 && rating > 0
-      ? `Надёжная игра в воротах «${clubLbl}» (ср. оценка ${rating.toFixed(2)}).`
-      : `Высокий класс вратаря в обойме «${clubLbl}» (OVR ${ovr}).`;
+    return matches > 0
+      ? `Надёжная игра в воротах «${clubLbl}» (${matches} игр в сезоне).`
+      : `Высокий класс вратаря в обойме «${clubLbl}».`;
   }
   if (goals + assists >= 4) {
     return `Яркая результативность в сезоне за «${clubLbl}» (${goals} Г + ${assists} П).`;
   }
-  if (votes >= 2 && (rating >= 6.4 || matches === 0)) {
+  if (votes >= 2) {
     return `Сильный отрезок в «${clubLbl}» и поддержка болельщиков (${votes} гол.).`;
   }
   if (teamType === "u21") {
     const a = ageOfPlayer(p);
-    return matches > 0 && rating > 0
-      ? `Один из лидеров своего возраста${a ? ` (${a} л.)` : ""} в «${clubLbl}» (оценка ${rating.toFixed(2)}).`
-      : `Перспективный игрок для молодёжки U21 из «${clubLbl}» (OVR ${ovr}).`;
+    return matches > 0
+      ? `Один из лидеров своего возраста${a ? ` (${a} л.)` : ""} в «${clubLbl}» (${matches} игр).`
+      : `Перспективный игрок для молодёжки U21 из «${clubLbl}».`;
   }
-  if (matches > 0 && rating >= 6.8) {
-    return `Стабильная форма и уверенные оценки в «${clubLbl}» (${rating.toFixed(2)} за ${matches} игр).`;
+  if (matches > 0) {
+    return `Стабильная форма и игровая практика в «${clubLbl}» (${matches} игр).`;
   }
-  return `Выбор штаба под тактику из состава «${clubLbl}» (OVR ${ovr}).`;
+  return `Выбор штаба под тактику из состава «${clubLbl}».`;
 }
 function isRussianNationalEligible(p: any, teamType: "main" | "u21" = "main") {
   if (!p) return false;
@@ -27962,7 +27958,7 @@ app.post("/api/admin/national/generate", admin, async (req, res) => {
           const pAge = ageOfPlayer(p);
           const abroadTag = isRussianAbroadPlayer(p) ? `|ЛЕГИОНЕР:${nationalPlayerClubLabel(p)}` : "";
           const vTag = votes > 0 ? `|ПРЕДЛОЖЕН:${votes} гол.${pNote ? ` (${pNote})` : ""}` : "";
-          return `${p.id}|${p.name}|${p.pos}|Возраст:${pAge ?? "?"}|${nationalPlayerClubLabel(p)}|OVR:${p.ovr || 70}|М:${p.matches || 0}|Г:${p.goals || 0}|П:${p.assists || 0}|Рейт:${Number(p.rating || 0).toFixed(2)}${abroadTag}${vTag}`;
+          return `${p.id}|${p.name}|${p.pos}|Возраст:${pAge ?? "?"}|${nationalPlayerClubLabel(p)}|М:${p.matches || 0}|Г:${p.goals || 0}|П:${p.assists || 0}${p.form ? `|Форма:${String(p.form).slice(0, 60)}` : ""}${abroadTag}${vTag}`;
         }
       ).join("\n");
       const teamLabelSys = teamType === "u21"
@@ -28154,7 +28150,7 @@ app.post("/api/admin/check-squad", admin, async (req, res) => {
   if (!t) return fail(res, "\u041A\u043B\u0443\u0431 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D");
   const sq = squadOf(t.id);
   if (!sq.length) return res.json({ realistic: true, summary: "\u0421\u043E\u0441\u0442\u0430\u0432 \u043F\u0443\u0441\u0442.", flaggedPlayers: [] });
-  const squadText = sq.map((p) => `${p.name} (${p.pos}, ${ageOfPlayer(p) ?? 25} \u043B\u0435\u0442, ${p.nat || "RUS"}, OVR ${p.ovr || 70})`).join("\n");
+  const squadText = sq.map((p) => `${p.name} (${p.pos}, ${ageOfPlayer(p) ?? 25} \u043B\u0435\u0442, ${p.nat || "RUS"}${p.realClub ? `, ${p.realClub}` : ""})`).join("\n");
   if (hasLLM()) {
     try {
       const prompt = `\u0422\u044B \u2014 \u0444\u0443\u0442\u0431\u043E\u043B\u044C\u043D\u044B\u0439 \u0441\u043A\u0430\u0443\u0442 \u0438 \u044D\u043A\u0441\u043F\u0435\u0440\u0442 \u043F\u043E \u0440\u043E\u0441\u0441\u0438\u0439\u0441\u043A\u043E\u043C\u0443 \u0444\u0443\u0442\u0431\u043E\u043B\u0443. \u041F\u0440\u043E\u0432\u0435\u0440\u044C \u0441\u043E\u0441\u0442\u0430\u0432 \u043A\u043B\u0443\u0431\u0430 "${t.name}" (\u043B\u0438\u0433\u0430: ${t.comp.toUpperCase()}) \u043D\u0430 \u0440\u0435\u0430\u043B\u0438\u0437\u043C.

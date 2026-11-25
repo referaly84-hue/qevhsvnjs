@@ -12188,7 +12188,7 @@ function intraLineupForm(box, f, c, withT, app) {
       const fatHtml = isAdmin ? renderFatigueBadge(p._src === 'loan' ? p.fatigue : fFatMap[p.id], ok, why, { compact: true }) : '';
       const rowBg = v.startsWith('home_') ? 'background:#f0fdf4' : v.startsWith('away_') ? 'background:#eff6ff' : '';
       return `<div class="row sp" style="padding:5px 6px;border-bottom:1px solid var(--line);gap:8px;${rowBg}${!ok ? ';opacity:.6' : ''}">
-        <span style="min-width:0;flex:1">${clientPosBadgeHtml(p)} <b>${e(p.name)}</b> ${p.ovr ? `<span class="muted small">(${p.ovr})</span>` : ''} ${srcBadge(p)} ${fatHtml}</span>
+        <span style="min-width:0;flex:1">${clientPosBadgeHtml(p)} <b>${e(p.name)}</b> ${srcBadge(p)} ${fatHtml}</span>
         ${ok ? `<select data-intra-p="${e(p.id)}" style="min-width:190px">
           <option value="none" ${v === 'none' ? 'selected' : ''}>— Не играет —</option>
           <option value="home_start" ${v === 'home_start' ? 'selected' : ''}>🏠 Старт: ${e(hLbl)}</option>
