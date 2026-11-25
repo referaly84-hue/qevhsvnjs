@@ -6436,6 +6436,12 @@ try {
   ],
   "state_at_end": {
     "chosen_scenario": "В 1-м отрезке: выбранный тобой сценарий, темп и характер матча исходя из турнирных задач, тактики и игроков (1–2 фразы); дальше — как он развивается или переломился",
+    "halftime_digest": [
+      "Факт 1 (рисунок и зоны): какой рисунок игры сложился, кто владел инициативой, темпом и через какие фланги/зоны шли атаки",
+      "Факт 2 (игроки): кто выделяется в этом отрезке/тайме (тащит, проваливается, «горит» на жёлтой карточке, уже «наелся»/подсел физически)",
+      "Факт 3 (решения тренеров): какую логичную тактическую коррекцию, перестановку или замену готовят/делают тренеры с учётом их характера и установки владельца",
+      "Факт 4 (нерв и уязвимость): главный сюжетный акцент, риск или открытая зона на следующий отрезок/2-й тайм"
+    ],
     "halftime_adjustments": "Какие перестановки, реакция тренеров, смена темпа или перелом назрели к следующему отрезку (1–2 фразы)",
     "momentum_note": "Краткая сводка хода игры к концу отрезка",
     "energy_spent": {
@@ -12322,7 +12328,17 @@ function buildUser(ctx, a, b, st, issues, mode = "full") {
     }
     if (ctx.chosenScenario) u += `- Выбранный сценарий и нерв этого матча: ${ctx.chosenScenario}
 `;
+    if (Array.isArray(ctx.halftimeDigest) && ctx.halftimeDigest.length) {
+      const memTitle = a >= 46
+        ? "ПАМЯТЬ ПЕРВОГО ТАЙМА (КОНСПЕКТ ПЕРЕРЫВА — ПРОДОЛЖАЙ ИГРУ ОТ ЭТОГО, НЕ С ЧИСТОГО ЛИСТА)"
+        : "ПАМЯТЬ ПРОШЛОГО ОТРЕЗКА (КОНСПЕКТ ИГРЫ)";
+      u += `- ${memTitle}:
+${ctx.halftimeDigest.map((line: string, idx: number) => `  ${idx + 1}) ${line}`).join("\n")}
+`;
+    }
     if (ctx.halftimeAdjustments) u += `- Тактические акценты и сдвиг игры к этому отрезку: ${ctx.halftimeAdjustments}
+`;
+    if (st.fhStats) u += `- Фактическая сводка уже сыгранного (${H} vs ${A}): ${st.fhStats}
 `;
     if (st.note) u += `- Ход игры и моментум: ${st.note}
 `;
@@ -12501,7 +12517,13 @@ ${broadcastBlock}
 Сгенерируй отрезок матча (минуты ${a}–${b}) строго в валидном JSON без markdown-обёртки по правилам промпта (раздел 10 — формат вывода). Держи живой авторский язык комментатора, не повторяй однотипные зачины и помни о реалистичности фолов (много лёгких фолов БЕЗ карточки) и редкости красных карточек.`;
   u += ` Ориентир по числу игровых событий в этом отрезке: ${Math.max(12, Math.round(span / 45 * 50))}–${Math.max(22, Math.round(span / 45 * 85))}.`;
   if (a === 1) u += ` Это НАЧАЛО эфира: перед первым отрезком САМ выбери уникальный, реалистичный сценарий, темп и боевой настрой матча исходя из турнирной таблицы, мотивации обеих команд (например, борьба за 1-е место, медали, выживание или спокойный матч), разницы в классе, тактики, тренеров и профилей игроков — НЕ скатывайся в среднестатистический шаблон — и зафиксируй выбранный сценарий в state_at_end.chosen_scenario. Сначала дай прематч по разделу 0 (события с отрицательными минутами от -15 до -1 и допустимыми для него типами), затем kickoff на 1-й минуте и игру по выбранному сценарию.`;
-  else u += ` Прематч уже прошёл: события с отрицательными минутами НЕ создавай, продолжай ровно с минуты ${a}. Развивай или резко переламывай выбранный сценарий исходя из текущего счёта, карточек, усталости, замен и тренерских корректировок в перерыве, а итог зафиксируй в state_at_end.chosen_scenario, state_at_end.halftime_adjustments и state_at_end.momentum_note.`;
+  else u += ` Прематч уже прошёл: события с отрицательными минутами НЕ создавай, продолжай ровно с минуты ${a}. Развивай или резко переламывай выбранный сценарий исходя из текущего счёта, карточек, усталости, замен и тренерских корректировок в перерыве, а итог зафиксируй в state_at_end.chosen_scenario, state_at_end.halftime_digest, state_at_end.halftime_adjustments и state_at_end.momentum_note.`;
+  if (b === 45) {
+    u += ` ОБЯЗАТЕЛЬНЫЙ «КОНСПЕКТ ПЕРЕРЫВА» ДЛЯ ПАМЯТИ 2-ГО ТАЙМА В "state_at_end.halftime_digest": НЕ ограничивайся одним общим предложением! Верни массив из 3–4 конкретных фактов по итогам 1-го тайма: 1) какой рисунок игры сложился, кто владел инициативой и через какие зоны/фланги шли главные атаки и моменты; 2) кто из конкретных игроков 1-го тайма выделяется (кто тащит/опасен/спасает, кто проваливается, кто «горит» на ЖК или уже явно «наелся»); 3) какую логичную перестановку, коррекцию темпа или замену делают тренеры обеих команд в перерыве (с учётом их характера и предматчевой установки владельца); 4) главный узел напряжения/уязвимость на старт 2-го тайма.`;
+  }
+  if (a >= 46) {
+    u += ` ПАМЯТЬ 2-ГО ТАЙМА: НЕ начинай второй тайм с чистого листа! Опирайся на «КОНСПЕКТ ПЕРЕРЫВА» сверху: покажи в игре после свистка на 46-й минуте, как работают или ломаются перестановки тренеров из перерыва, развивай/перекрывай проблемные зоны и фланги 1-го тайма и учитывай конкретных игроков, которые выделяются, устали или «горят» на жёлтой карточке.`;
+  }
   if (b >= 90) {
     u += ` Это конец матча: заверши событием fulltime; после финального свистка по разделу 0.8 можно добавить 1–3 события (min 90–95, типы crowd | tactical_note | incident).
 ОБЯЗАТЕЛЬНЫЙ ИТОГ УСТАЛОСТИ В "state_at_end.energy_spent": оцени персонально каждого игрока, выходившего на поле в этом матче (оба старта и все замены), кто на сколько % устал ИМЕННО ПО ПРОДЕЛАННОЙ РАБОТЕ В МАТЧЕ (НЕ одинаково по минутам!):
@@ -12733,12 +12755,29 @@ function resolve(idx, name, side) {
   return pick(idx.filter((x) => x.last === last));
 }
 function deriveState(events, ctx, note?: any) {
-  const st = { score: [0, 0], scorers: [] as string[], yellows: { home: [], away: [] }, reds: [], off: [], subs: { home: 0, away: 0 }, subT: { home: [], away: [] }, slots: { home: 0, away: 0 }, ins: [], legOnPitch: { home: 0, away: 0 }, note: note || "", last: events.slice(-8).map((e) => `${e.min}' ${e.text}`) };
+  const st = { score: [0, 0], scorers: [] as string[], yellows: { home: [], away: [] }, reds: [], off: [], subs: { home: 0, away: 0 }, subT: { home: [], away: [] }, slots: { home: 0, away: 0 }, ins: [], legOnPitch: { home: 0, away: 0 }, fhStats: "", note: note || "", last: events.slice(-8).map((e) => `${e.min}' ${e.text}`) };
   const onPitchIds: Record<"home" | "away", Set<string>> = {
     home: new Set<string>(ctx?.lineup?.home?.starters || []),
     away: new Set<string>(ctx?.lineup?.away?.starters || [])
   };
+  let shH = 0, shA = 0, svH = 0, svA = 0, corH = 0, corA = 0, flH = 0, flA = 0, postH = 0, postA = 0;
   for (const e of events) {
+    if (e.type === "shot" || e.type === "penalty") {
+      if (e.team === "home") shH++;
+      else if (e.team === "away") shA++;
+    } else if (e.type === "save") {
+      if (e.team === "home") svH++;
+      else if (e.team === "away") svA++;
+    } else if (e.type === "corner") {
+      if (e.team === "home") corH++;
+      else if (e.team === "away") corA++;
+    } else if (e.type === "foul") {
+      if (e.team === "home") flH++;
+      else if (e.team === "away") flA++;
+    } else if (e.type === "post") {
+      if (e.team === "home") postH++;
+      else if (e.team === "away") postA++;
+    }
     if (e.type === "goal" || e.type === "own_goal") {
       st.score[e.team === "home" ? 0 : 1]++;
       const tName = ctx.sides?.[e.team]?.name || (e.team === "home" ? "Хозяева" : "Гости");
@@ -12779,6 +12818,9 @@ function deriveState(events, ctx, note?: any) {
     home: [...onPitchIds.home].filter((pid) => isCtxPidLegionnaire(ctx, pid)).length,
     away: [...onPitchIds.away].filter((pid) => isCtxPidLegionnaire(ctx, pid)).length
   };
+  if (shH || shA || svH || svA || corH || corA || flH || flA) {
+    st.fhStats = `удары ${shH}:${shA}, сейвы вратарей ${svH}:${svA}, угловые ${corH}:${corA}, фолы ${flH}:${flA}${postH || postA ? `, каркас ворот ${postH}:${postA}` : ""}`;
+  }
   return st;
 }
 function isDisallowedGoalText(txt: string) {
@@ -13535,8 +13577,20 @@ async function genPeriod(a, b, ctx, prev, note, depth = 0, onAtomicSuccess?: (se
       const evs = normalizeEvents(rawEvents, a, b, ctx, prev, 3, { strictLegionSub: attempt + 1 < maxAttempts });
       const chosenScenario = String(r?.state_at_end?.chosen_scenario || "").trim();
       const halftimeAdjustments = String(r?.state_at_end?.halftime_adjustments || "").trim();
+      const rawDigest = r?.state_at_end?.halftime_digest ?? r?.state_at_end?.halftime_summary ?? r?.state_at_end?.first_half_summary;
+      const digestItems = Array.isArray(rawDigest)
+        ? rawDigest.map((x: any) => String(x || "").trim()).filter(Boolean).slice(0, 5)
+        : (typeof rawDigest === "string" && rawDigest.trim()
+            ? rawDigest.split(/\n+|\s*;\s*/).map((x) => x.replace(/^\d+[.)]\s*/, "").trim()).filter(Boolean).slice(0, 5)
+            : []);
       if (chosenScenario) ctx.chosenScenario = chosenScenario;
       if (halftimeAdjustments) ctx.halftimeAdjustments = halftimeAdjustments;
+      if (digestItems.length) {
+        ctx.halftimeDigest = digestItems;
+      } else if (b === 45 && (!Array.isArray(ctx.halftimeDigest) || !ctx.halftimeDigest.length)) {
+        const fbDigest = [chosenScenario, halftimeAdjustments, String(r?.state_at_end?.momentum_note || "").trim()].filter(Boolean);
+        if (fbDigest.length) ctx.halftimeDigest = fbDigest;
+      }
       const rawEnergy = b >= 90 ? (r?.state_at_end?.energy_spent || r?.state_at_end?.fatigue_report || r?.energy_spent || null) : null;
       const rawRefEval = b >= 90 ? (r?.state_at_end?.referee_eval || r?.referee_eval || null) : null;
       const out = { a, b, events: evs, note: r?.state_at_end?.momentum_note || note, fallback: false, energyReport: rawEnergy, refereeReport: rawRefEval };
