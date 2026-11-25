@@ -5519,7 +5519,7 @@ function paintMatch() {
           const slotBadge = slotDiff
             ? (isAltMatch
               ? ` <span class="tag" style="font-size:10.5px;background:#f0fdf4;color:#15803d;border-color:#86efac" title="Выходит на своей дополнительной позиции">доп. поз.: ${e(p.slotPos)}</span>`
-              : ` <span class="tag" style="font-size:10.5px;${isForced ? 'background:#fffbeb;color:#b45309;border-color:#fcd34d' : 'background:#eff6ff;color:#1e40af;border-color:#bfdbfe'}" title="${isForced ? 'Вынужденная перестановка в схеме' : 'Смежная позиция в схеме'}">в схеме: ${e(p.slotPos)}</span>`)
+              : ` <span class="tag" style="font-size:10.5px;${isForced ? 'background:#fffbeb;color:#b45309;border-color:#fcd34d' : 'background:#eff6ff;color:#1e40af;border-color:#bfdbfe'}" title="${isForced ? 'Предупреждение по роли в схеме (ВР/поле или ЦЗ↔ЦФ)' : 'Смена/адаптация роли в схеме (оценка по профилю)'}">в схеме: ${e(p.slotPos)}</span>`)
             : '';
           return `<div>${clientPosBadgeHtml(p, 'min-width:32px;display:inline-block;text-align:center')} ${e(p.name)}${capBadge}${slotBadge}${p.loan ? ` <span class="muted small">(из «${e(p.loan)}»)</span>` : ''}</div>`;
         }).join('') : '<div class="muted small">Стартовый состав уточняется ближе к игре.</div>'}
@@ -11131,7 +11131,10 @@ function clientFormationSlots(formation) {
 function clientSinglePosFit(naturalPos, slotPos) {
   const nat = clientNormPos(naturalPos), slot = clientNormPos(slotPos);
   if (nat === slot) return { cost: 0, severity: 'exact', badge: '✓ Своя', color: '#15803d', bg: '#f0fdf4', border: '#86efac' };
-  if (nat === 'ВР' || slot === 'ВР') return { cost: 50, severity: 'critical', badge: '🚫 Критическая перестановка', color: '#b91c1c', bg: '#fef2f2', border: '#fca5a5' };
+  if (nat === 'ВР' || slot === 'ВР') return { cost: 50, severity: 'critical', badge: '🚫 Критическая (ВР/поле)', color: '#b91c1c', bg: '#fef2f2', border: '#fca5a5' };
+  if ((nat === 'ЦЗ' && slot === 'ЦФ') || (nat === 'ЦФ' && slot === 'ЦЗ')) {
+    return { cost: 12, severity: 'forced', badge: '⚠ ЦЗ↔ЦФ', color: '#b45309', bg: '#fffbeb', border: '#fcd34d' };
+  }
   const minors = [
     nat === 'ЛВ' && slot === 'ЛП', nat === 'ЛП' && slot === 'ЛВ',
     nat === 'ПВ' && slot === 'ПП', nat === 'ПП' && slot === 'ПВ',
@@ -11147,7 +11150,7 @@ function clientSinglePosFit(naturalPos, slotPos) {
     nat === 'ОП' && ['АП', 'ЛП', 'ПП'].includes(slot)
   ];
   if (minors.some(Boolean)) return { cost: 2, severity: 'minor', badge: '~ Смежная', color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd' };
-  return { cost: 9, severity: 'forced', badge: '⚠ Неродная (вынужденная)', color: '#b45309', bg: '#fffbeb', border: '#fcd34d' };
+  return { cost: 7, severity: 'minor', badge: '↔ По профилю', color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd' };
 }
 function clientPosFit(playerOrPos, slotPos) {
   const list = clientPlayerPositions(playerOrPos);
@@ -11471,7 +11474,7 @@ function lineupForm(box, f, c, withT, app) {
       </div>
       <div class="muted small" style="margin-bottom:6px">Вы можете сами изменить любую позицию слева (например, выбрать ЛП, ЦП, ПП вместо ОП) и назначить нужного игрока справа.</div>
       <div>${rowsHtml}</div>
-      ${forcedList.length ? `<div style="margin-top:8px;padding:7px 10px;border-radius:6px;background:#fffbeb;border:1px solid #fcd34d;color:#b45309;font-size:12px"><b>⚠ Вынужденная перестановка:</b> ${e(forcedList.join('; '))} — это учитывается движком матча (возможны ошибки в приёме и выборе позиции).</div>` : ''}
+      ${forcedList.length ? `<div style="margin-top:8px;padding:7px 10px;border-radius:6px;background:#fffbeb;border:1px solid #fcd34d;color:#b45309;font-size:12px"><b>⚠ Предупреждение по роли:</b> ${e(forcedList.join('; '))} — крайне непривычная позиция (ВР в поле/в ворота или ЦЗ↔ЦФ); оценивается симулятором с учётом профиля игрока.</div>` : ''}
     `;
     wrap.querySelector('#auto_slots_btn')?.addEventListener('click', () => {
       const targetSlots = currentSlots.length === 11 ? currentSlots.map(x => x.slot) : clientFormationSlots(fm);
@@ -11853,7 +11856,7 @@ function lineupForm(box, f, c, withT, app) {
           ${forcedSlots.length
             ? forcedSlots.map(x => `<div class="small" style="color:#b45309">⚠️ <b>${e(poolById[x.pid]?.name || x.pid)}</b> (${e(clientPosLabel(poolById[x.pid] || x.naturalPos))} → <b>${e(x.slotPos)}</b>): ${e(x.fit.note || x.fit.label)}</div>`).join('')
             : (minorSlots.length
-              ? `<div class="small" style="color:#0369a1">ℹ️ ${minorSlots.length} смежных перестановок (${minorSlots.map(x => `${e(poolById[x.pid]?.name || '')}: ${e(clientPosLabel(poolById[x.pid] || x.naturalPos))}→${e(x.slotPos)}`).join(', ')}) — допустимая адаптация.</div>`
+              ? `<div class="small" style="color:#0369a1">ℹ️ ${minorSlots.length} смен/адаптаций ролей (${minorSlots.map(x => `${e(poolById[x.pid]?.name || '')}: ${e(clientPosLabel(poolById[x.pid] || x.naturalPos))}→${e(x.slotPos)}`).join(', ')}) — оцениваются индивидуально по профилю игрока.</div>`
               : '<div class="small" style="color:#15803d">✅ Все 11 игроков старта выходят на своих родных или дополнительных позициях.</div>')}
         </div>` : ''}
         ${isAdmin ? `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
@@ -12223,7 +12226,7 @@ function intraLineupForm(box, f, c, withT, app) {
           ? (forcedSlots.length
               ? forcedSlots.map(x => `<div class="small" style="color:#b45309">⚠️ <b>${e(poolById[x.pid]?.name || x.pid)}</b> (${e(clientPosLabel(poolById[x.pid] || x.naturalPos))} → <b>${e(x.slotPos)}</b>)</div>`).join('')
               : (minorSlots.length
-                  ? `<div class="small" style="color:#0369a1">ℹ️ Смежные перестановки (${minorSlots.length}): ${minorSlots.map(x => `${e(poolById[x.pid]?.name || '')} → ${e(x.slotPos)}`).join(', ')}</div>`
+                  ? `<div class="small" style="color:#0369a1">ℹ️ Роли со сменой позиции (${minorSlots.length}): ${minorSlots.map(x => `${e(poolById[x.pid]?.name || '')} → ${e(x.slotPos)}`).join(', ')} (по профилю)</div>`
                   : '<div class="small" style="color:#15803d">✅ Все 11 игроков старта выходят на родные/подходящие позиции.</div>'))
           : '<div class="small muted">Выберите 11 игроков старта, чтобы проверить расстановку на поле.</div>';
       } catch (_) {}
