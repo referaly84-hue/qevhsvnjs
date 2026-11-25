@@ -14635,6 +14635,9 @@ function startLive(id) {
     tg(`🏟 <b>${esc(tn(f.home))} — ${esc(tn(f.away))}</b>
 ${esc(compName(f))}, ${esc(roundLabel(f))}
 Трансляция началась${db.settings.siteUrl ? `: ${esc(db.settings.siteUrl)}/#/match/${id}` : ""}`);
+    if (tgSendMatchInterviews(f, m, "preMatch")) {
+      save();
+    }
   }
   const step = () => {
     const curF = fx(id);
@@ -14669,7 +14672,11 @@ ${esc(compName(f))}, ${esc(roundLabel(f))}
       : {};
     pushLive(id, { type: "event", e, ...liveSnap });
     tgEvent(curF, e);
-    const isKeyLiveEvent = e.type === "goal" || e.type === "own_goal" || e.type === "red" || e.type === "pen_goal" || e.type === "halftime" || e.type === "fulltime";
+    let sentHalftimeIv = false;
+    if (e.type === "halftime" || (Number(e.min) >= 46 && !curF.tgInterviewsSent?.halftime && !m.light)) {
+      sentHalftimeIv = tgSendMatchInterviews(curF, m, "halftime");
+    }
+    const isKeyLiveEvent = sentHalftimeIv || e.type === "goal" || e.type === "own_goal" || e.type === "red" || e.type === "pen_goal" || e.type === "halftime" || e.type === "fulltime";
     if (isKeyLiveEvent || now - lastLiveSaveAt >= 15e3) {
       lastLiveSaveAt = now;
       save();
@@ -14711,7 +14718,11 @@ async function finish(id) {
   try {
   if (!m.light && Array.isArray(m.events) && (f.pos || 0) < m.events.length) {
     for (let idx = f.pos || 0; idx < m.events.length; idx++) {
-      tgEvent(f, m.events[idx]);
+      const ev = m.events[idx];
+      tgEvent(f, ev);
+      if (ev?.type === "halftime" || (Number(ev?.min) >= 46 && !f.tgInterviewsSent?.halftime)) {
+        tgSendMatchInterviews(f, m, "halftime");
+      }
     }
   }
   if (Array.isArray(m.events) && m.events.length > 0) {
@@ -14937,6 +14948,9 @@ async function finish(id) {
   tg(`🏁 <b>Итог: ${esc(HName)} ${f.hg}:${f.ag} ${esc(AName)}</b>${f.pen ? ` (пен. ${f.pen.hg}:${f.pen.ag})` : ""}
 Владение ${st.poss[0]}–${st.poss[1]}, удары ${st.teams.home.sh}–${st.teams.away.sh}, xG ${st.teams.home.xg}–${st.teams.away.xg}${lightHighlights}${db.settings.siteUrl ? `
 ${esc(db.settings.siteUrl)}/#/match/${id}` : ""}`);
+  if (tgSendMatchInterviews(f, m, "postMatch")) {
+    save();
+  }
   pushLive(id, { type: "end" });
   delete timers[id];
   void maybeSendRoundAwardsToTg(f);
@@ -15484,6 +15498,120 @@ function tgEvent(f, e) {
     title = `${icon} <b>${hName} ${score} ${aName}</b> \xB7 <b>${minute}</b>`;
   }
   tg(text ? `${title}\n${text}` : title);
+}
+function buildMatchInterviewTgMessages(f: any, m: any, stage: "preMatch" | "halftime" | "postMatch"): string[] {
+  if (!f || !m) return [];
+  const rawH = sideDisplayName(f, "home");
+  const rawA = sideDisplayName(f, "away");
+  const HName = rawH && rawH !== "?" ? rawH : (m?.ctx?.sides?.home?.name || rawH || "Хозяева");
+  const AName = rawA && rawA !== "?" ? rawA : (m?.ctx?.sides?.away?.name || rawA || "Гости");
+  if (!m.interviews) {
+    try {
+      const cH = getCoachForTeam(f.home);
+      const cA = getCoachForTeam(f.away);
+      m.interviews = buildFallbackMatchInterviews({
+        fixture: f,
+        events: m.events || [],
+        ctx: m.ctx || {},
+        homeName: HName,
+        awayName: AName,
+        coachHome: cH,
+        coachAway: cA,
+        motm: m.motm || null,
+        finalScore: [Number(f.hg ?? f.final?.[0] ?? 0), Number(f.ag ?? f.final?.[1] ?? 0)]
+      });
+    } catch {
+      return [];
+    }
+  }
+  const iv = m.interviews;
+  if (!iv) return [];
+
+  if (stage === "preMatch") {
+    const pre = iv.preMatch;
+    if (!pre) return [];
+    const blocks: string[] = [];
+    for (const side of ["home", "away"] as const) {
+      const item = pre[side];
+      const quote = String(item?.quote || "").trim();
+      if (!quote) continue;
+      const cName = String(item?.coachName || (side === "home" ? getCoachForTeam(f.home)?.name : getCoachForTeam(f.away)?.name) || "Главный тренер").trim();
+      const tName = String(item?.teamName || (side === "home" ? HName : AName)).trim();
+      blocks.push(`👔 <b>${esc(cName)}</b> («${esc(tName)}»):\n<i>«${esc(quote)}»</i>`);
+    }
+    if (!blocks.length) return [];
+    return [`🎙 <b>Предматчевое флеш-интервью · ${esc(HName)} — ${esc(AName)}</b>\n\n${blocks.join("\n\n")}`];
+  }
+
+  if (stage === "halftime") {
+    const ht = iv.halftime;
+    if (!ht) return [];
+    const htScore = Array.isArray(ht.htScore) && ht.htScore.length >= 2
+      ? `${Number(ht.htScore[0]) || 0}:${Number(ht.htScore[1]) || 0}`
+      : `${Number(f.hg ?? 0)}:${Number(f.ag ?? 0)}`;
+    const blocks: string[] = [];
+    for (const side of ["home", "away"] as const) {
+      const item = ht[side];
+      const quote = String(item?.quote || "").trim();
+      if (!quote) continue;
+      const pName = String(item?.playerName || "Игрок").trim();
+      const pos = String(item?.pos || "").trim();
+      const tName = String(side === "home" ? HName : AName).trim();
+      blocks.push(`🗣 <b>${esc(pName)}</b> (${pos ? `${esc(pos)}, ` : ""}«${esc(tName)}»):\n<i>«${esc(quote)}»</i>`);
+    }
+    if (!blocks.length) return [];
+    return [`🎙 <b>Флеш-интервью в перерыве · ${esc(HName)} ${htScore} ${esc(AName)}</b>\n\n${blocks.join("\n\n")}`];
+  }
+
+  if (stage === "postMatch") {
+    const post = iv.postMatch;
+    const blocks: string[] = [];
+    if (post) {
+      for (const side of ["home", "away"] as const) {
+        const item = post[side];
+        const quote = String(item?.quote || "").trim();
+        if (!quote) continue;
+        const cName = String(item?.coachName || (side === "home" ? getCoachForTeam(f.home)?.name : getCoachForTeam(f.away)?.name) || "Главный тренер").trim();
+        const tName = String(item?.teamName || (side === "home" ? HName : AName)).trim();
+        blocks.push(`👔 <b>${esc(cName)}</b> («${esc(tName)}»):\n<i>«${esc(quote)}»</i>`);
+      }
+    }
+    const motm = iv.motm || (m.motm ? {
+      playerName: m.motm.name,
+      pos: m.motm.pos,
+      teamName: m.motm.teamName,
+      headline: m.motm.headline,
+      quote: m.motm.interview?.quote,
+      tacticsComment: m.motm.interview?.tacticsComment
+    } : null);
+    if (motm && (motm.quote || motm.headline)) {
+      const mLines: string[] = [];
+      const mName = String(motm.playerName || "Игрок матча").trim();
+      const mPos = String(motm.pos || "").trim();
+      const mTeam = String(motm.teamName || HName).trim();
+      mLines.push(`⭐ <b>Лучший игрок матча — ${esc(mName)}</b> (${mPos ? `${esc(mPos)}, ` : ""}«${esc(mTeam)}»)`);
+      if (motm.headline) mLines.push(`<b>«${esc(String(motm.headline).trim())}»</b>`);
+      if (motm.quote) mLines.push(`<i>«${esc(String(motm.quote).trim())}»</i>`);
+      if (motm.tacticsComment) mLines.push(`💬 <i>О тактике: ${esc(String(motm.tacticsComment).trim())}</i>`);
+      blocks.push(mLines.join("\n"));
+    }
+    if (!blocks.length) return [];
+    return [`🎙 <b>Послематчевое флеш-интервью · ${esc(HName)} ${Number(f.hg ?? 0)}:${Number(f.ag ?? 0)} ${esc(AName)}</b>\n\n${blocks.join("\n\n")}`];
+  }
+
+  return [];
+}
+function tgSendMatchInterviews(f: any, m: any, stage: "preMatch" | "halftime" | "postMatch"): boolean {
+  if (!f || !m) return false;
+  f.tgInterviewsSent ||= {};
+  if (f.tgInterviewsSent[stage]) return false;
+  const msgs = buildMatchInterviewTgMessages(f, m, stage);
+  if (!msgs.length) return false;
+  f.tgInterviewsSent[stage] = true;
+  for (const msg of msgs) {
+    tg(msg);
+  }
+  return true;
 }
 function hashCommentSeed(str: string): number {
   let h = 2166136261;
@@ -16180,6 +16308,90 @@ function tgNotifyTransfer(t: any, p?: any, pSwap?: any) {
   const foreignIn = t.isForeign ? " из зарубежного клуба" : "";
   const feePart = feeAmt > 0 && fee ? ` за <b>${esc(fee)}</b>` : (fee && fee !== "€0" ? ` (${esc(fee)})` : "");
   tg(`🤝 <b>Официальный трансфер${foreignIn}!</b>\n<b>${pName}</b>${posStr} переходит из «${fromName}» в «${toName}»${feePart}.${commentLine}${sellOnStr}${siteLink}`);
+}
+function buildTransferOfferTgMessage(offer: any): string {
+  if (!offer) return "";
+  const pName = esc(offer.playerName || "Игрок");
+  const pos = esc(offer.pos || "");
+  const posStr = pos ? ` (${pos})` : "";
+  const isEuroReq = !!(offer.clubId && (offer.fromClub !== undefined || offer.transferType));
+  const fromRaw = offer.fromName || offer.fromClub || (offer.from ? tn(offer.from) : "Свободный агент");
+  const toRaw = offer.toName || offer.clubName || (offer.to ? tn(offer.to) : "Клуб");
+  const fromName = esc(fromRaw);
+  const toName = esc(toRaw);
+  const fee = offer.fee ? String(offer.fee) : "";
+  const feeAmt = offer.feeAmount !== undefined && offer.feeAmount !== null
+    ? (Number(offer.feeAmount) || 0)
+    : resolveSafeFeeAmount(offer);
+  const kind = String(offer.type || offer.transferType || "transfer");
+  const isMandatory = kind === "loan_mandatory_rpl" || !!offer.mandatoryBuyout || !!offer.mandatoryBuyoutOnRplRetention;
+  const isLoan = !isMandatory && kind.includes("loan");
+  const untilStr = offer.loanUntil ? ` до ${esc(ruDateStr(offer.loanUntil))}` : "";
+  const sellOnStr = Number(offer.sellOnPercent) > 0 ? `\n📊 Пункт о перепродаже (Sell-on): <b>${Number(offer.sellOnPercent)}%</b>` : "";
+  const noteRaw = typeof offer.note === "string" ? offer.note.trim().slice(0, 260) : "";
+  const noteLine = noteRaw ? `\n💬 <i>${esc(noteRaw)}</i>` : "";
+  const siteLink = db?.settings?.siteUrl ? `\n${esc(db.settings.siteUrl)}/#/transfers` : "";
+
+  if (kind === "free_agent" || offer.isFreeAgent) {
+    return `📨 <b>Предложение о подписании свободного агента!</b>\nКлуб «${toName}» подал заявку на игрока <b>${pName}</b>${posStr} (${fromName}).\n⏳ Ожидает одобрения администратора лиги.${noteLine}${siteLink}`;
+  }
+  if (offer.isForeign && !offer.to) {
+    const dealDesc = isLoan ? "аренду" : isMandatory ? "аренду с обязательным выкупом" : "трансфер";
+    return `🌍 <b>Новое предложение о трансфере из-за рубежа!</b>\nКлуб «${toName}»${offer.buyerCountry ? ` (${esc(offer.buyerCountry)})` : ""} предлагает ${dealDesc} за <b>${pName}</b>${posStr} («${fromName}»)${fee ? ` на сумму <b>${esc(fee)}</b>` : ""}.\n⏳ Ожидает ответа клуба «${fromName}».${noteLine}${siteLink}`;
+  }
+  if (isEuroReq) {
+    const natStr = offer.nationality ? ` (${esc(offer.nationality)})` : "";
+    if (isMandatory) {
+      const buyout = esc(offer.buyoutFee || fee || "€1.0M");
+      const cond = offer.loanCondition ? ` при условии: «${esc(offer.loanCondition)}»` : "";
+      const feeTxt = feeAmt > 0 && fee ? ` (${esc(fee)})` : "";
+      return `📨 <b>Новое предложение о трансфере из-за рубежа!</b>\nКлуб «${toName}» предлагает аренду с обязательным выкупом за <b>${pName}</b>${posStr}${natStr} из «${fromName}»${untilStr}${feeTxt}.\n💶 Обязательный выкуп: <b>${buyout}</b>${cond}.\n⏳ Ожидает рассмотрения администратором.${sellOnStr}${noteLine}${siteLink}`;
+    }
+    if (isLoan) {
+      const feeTxt = feeAmt > 0 && fee ? ` за <b>${esc(fee)}</b>` : "";
+      return `📨 <b>Новое предложение об аренде из-за рубежа!</b>\nКлуб «${toName}» предлагает арендовать <b>${pName}</b>${posStr}${natStr} из «${fromName}»${untilStr}${feeTxt}.\n⏳ Ожидает рассмотрения администратором.${sellOnStr}${noteLine}${siteLink}`;
+    }
+    return `📨 <b>Новое предложение о трансфере из-за рубежа!</b>\nКлуб «${toName}» хочет приобрести <b>${pName}</b>${posStr}${natStr} из «${fromName}»${fee ? ` за <b>${esc(fee)}</b>` : ""}.\n⏳ Ожидает рассмотрения администратором.${sellOnStr}${noteLine}${siteLink}`;
+  }
+  if (kind === "exchange") {
+    const swapName = esc(offer.exchangePlayerName || "игрока");
+    const extraFee = feeAmt > 0 && fee ? ` + доплата <b>${esc(fee)}</b>` : "";
+    const statusLine = offer.isRplToRpl
+      ? `Ожидает решения клуба «${fromName}» и администратора.`
+      : "Ожидает решения администратора.";
+    return `🔄 <b>Новое предложение об обмене!</b>\nКлуб «${toName}» предлагает «${fromName}» обмен: <b>${pName}</b>${posStr} ⇄ <b>${swapName}</b>${extraFee}.\n⏳ ${statusLine}${sellOnStr}${noteLine}${siteLink}`;
+  }
+  if (isMandatory) {
+    const buyout = esc(offer.buyoutFee || fee || "€1.0M");
+    const cond = offer.loanCondition ? ` при условии: «${esc(offer.loanCondition)}»` : "";
+    const feeTxt = feeAmt > 0 && fee ? ` (${esc(fee)})` : "";
+    const statusLine = offer.adminApproval === "approved" && offer.clubApproval === "pending"
+      ? `Ожидает решения клуба «${fromName}».`
+      : offer.isRplToRpl
+        ? `Ожидает согласия клуба «${fromName}» и администратора.`
+        : "Ожидает решения администратора.";
+    return `📨 <b>Новое предложение об аренде с обязательным выкупом!</b>\nКлуб «${toName}» предлагает за <b>${pName}</b>${posStr} («${fromName}») аренду${untilStr}${feeTxt}.\n💶 Обязательный выкуп: <b>${buyout}</b>${cond}.\n⏳ ${statusLine}${sellOnStr}${noteLine}${siteLink}`;
+  }
+  if (isLoan) {
+    const feeTxt = feeAmt > 0 && fee ? ` за <b>${esc(fee)}</b>` : "";
+    const statusLine = offer.adminApproval === "approved" && offer.clubApproval === "pending"
+      ? `Ожидает решения клуба «${fromName}».`
+      : offer.isRplToRpl
+        ? `Ожидает согласия клуба «${fromName}» и администратора.`
+        : "Ожидает решения администратора.";
+    return `📨 <b>Новое предложение об аренде!</b>\nКлуб «${toName}» предлагает арендовать <b>${pName}</b>${posStr} у «${fromName}»${untilStr}${feeTxt}.\n⏳ ${statusLine}${sellOnStr}${noteLine}${siteLink}`;
+  }
+  const feePart = feeAmt > 0 && fee ? ` на сумму <b>${esc(fee)}</b>` : (fee && fee !== "€0" ? ` (${esc(fee)})` : "");
+  const statusLine = offer.adminApproval === "approved" && offer.clubApproval === "pending"
+    ? `Ожидает решения клуба «${fromName}».`
+    : offer.isRplToRpl
+      ? `Ожидает согласия клуба «${fromName}» и администратора.`
+      : "Ожидает решения администратора.";
+  return `📨 <b>Новое предложение о трансфере!</b>\nКлуб «${toName}» сделал предложение по игроку <b>${pName}</b>${posStr} («${fromName}»)${feePart}.\n⏳ ${statusLine}${sellOnStr}${noteLine}${siteLink}`;
+}
+function tgNotifyTransferOffer(offer: any) {
+  const msg = buildTransferOfferTgMessage(offer);
+  if (msg) tg(msg);
 }
 function nowMskParts() {
   try {
@@ -21768,6 +21980,7 @@ app.post("/api/club/squad/add", needClub, async (req, res) => {
         at: Date.now()
       };
       db.transfers.unshift(trObj);
+      tgNotifyTransferOffer(trObj);
       if (!getTransferCooldownSummary(db, trActor.actorKey).cooldownRemainingMs) {
         recordTransferAdCooldown(db, trActor.actorKey);
       }
@@ -21929,6 +22142,7 @@ app.post("/api/club/squad/add-batch", needClub, async (req, res) => {
           at: Date.now()
         };
         db.transfers.unshift(trObj);
+        tgNotifyTransferOffer(trObj);
         pendingTransfers.push({ name: p.name, from: fromTeam?.name || "\u041A\u043B\u0443\u0431" });
         continue;
       }
@@ -23156,6 +23370,7 @@ app.post("/api/club/free-agent/sign", needClub, (req, res) => {
     at: Date.now()
   };
   db.transfers.unshift(trObj);
+  tgNotifyTransferOffer(trObj);
   if (!getTransferCooldownSummary(db, trActor.actorKey).cooldownRemainingMs) {
     recordTransferAdCooldown(db, trActor.actorKey);
   }
@@ -24110,7 +24325,7 @@ app.post("/api/admin/foreign-offers/generate", admin, async (req, res) => {
     if (!db.foreignOffers) db.foreignOffers = [];
     db.foreignOffers.push(offer);
     if (!db.transfers) db.transfers = [];
-    db.transfers.push({
+    const foreignTrObj = {
       id: "tr_" + offer.id,
       pid: offer.pid,
       playerName: offer.playerName,
@@ -24131,8 +24346,10 @@ app.post("/api/admin/foreign-offers/generate", admin, async (req, res) => {
       adminApproval: "approved",
       note: offer.scoutReport,
       foreignOfferId: offer.id
-    });
+    };
+    db.transfers.push(foreignTrObj);
     save();
+    tgNotifyTransferOffer(foreignTrObj);
     res.json({ ok: 1, offer, message: `\u041E\u0444\u0444\u0435\u0440 \u043E\u0442 \xAB${offer.buyerClub}\xBB \u0441\u0444\u043E\u0440\u043C\u0438\u0440\u043E\u0432\u0430\u043D.` });
   } catch (err) {
     fail(res, err.message || "\u041E\u0448\u0438\u0431\u043A\u0430 \u0433\u0435\u043D\u0435\u0440\u0430\u0446\u0438\u0438 \u043E\u0444\u0444\u0435\u0440\u0430");
@@ -27794,6 +28011,7 @@ app.post("/api/admin/transfer/direct", admin, (req, res) => {
     });
   }
   save();
+  tgNotifyTransferOffer(trObj);
   res.json({
     ok: 1,
     executed: false,
@@ -28564,6 +28782,9 @@ app.post("/api/club/transfer-request", needClub, async (req, res) => {
     recordTransferAdCooldown(db, trActor.actorKey);
   }
   save();
+  for (const reqItem of createdRequests) {
+    tgNotifyTransferOffer(reqItem);
+  }
   res.json({
     ok: 1,
     count: createdRequests.length,
@@ -29302,6 +29523,8 @@ export {
   buildDrawTournamentBrief,
   buildDynamicMotmInterview,
   buildFallbackDrawScript,
+  buildMatchInterviewTgMessages,
+  buildTransferOfferTgMessage,
   buildUser,
   cardLine,
   checkForeignInterestAfterMatch,
@@ -29354,6 +29577,8 @@ export {
   resumeLive,
   runAutoStartTick,
   runMatch,
-  startLive
+  startLive,
+  tgNotifyTransferOffer,
+  tgSendMatchInterviews
 };
 
